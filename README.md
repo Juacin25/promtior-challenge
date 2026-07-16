@@ -52,6 +52,16 @@ this section is filled in.
   deeper hierarchy (out of scope). Aligns with Issue #14 error handling:
   surface layer catches `BookingError`; callers can catch a specific rule.
   Overlap messages stay neutral and never name the conflicting booking's owner.
+- **Persistence: SQLite, repository is the only SQL boundary.** All SQL lives in
+  `data/repository.py` (parameterized queries only) and `data/db.py` (schema +
+  seed); no other layer touches SQL, and the repository does no business
+  validation. `db.py` init is idempotent (`CREATE TABLE IF NOT EXISTS` +
+  `INSERT OR IGNORE`), safe to call on every connection.
+- **Room capacities are fixed and seeded on init:** A=2, B=2, C=4, D=8, E=10
+  (single source: `ROOM_CAPACITIES` in `db.py`).
+- **Datetimes stored as ISO strings** (`isoformat()` / `fromisoformat()`),
+  round-tripping the GMT-3 (-03:00) offset — simple, human-readable storage
+  consistent with the app timezone.
 
 ## Manual GitHub steps (not automated)
 
