@@ -23,7 +23,22 @@ this section is filled in.
   config (pytest, coverage, ruff), so no separate `requirements.txt` /
   `pytest.ini` / `ruff.toml`. Runtime deps unpinned; dev tools under the `dev`
   extra.
-- **Coverage: branch coverage on, `source = ["app"]`, no `omit`.** UI/entrypoint
-  glue is excluded per-line via justified `# pragma: no cover` only — business
-  logic is never blanket-omitted. `fail_under` gate deferred to the CI issue.
+- **Coverage: branch on, `source = ["app"]`, `fail_under = 100`.** The gate lives
+  in `pyproject.toml` (single source); CI runs plain `pytest` and inherits it.
+  Only the Streamlit entrypoint `app/ui/streamlit_app.py` is `omit`-ted — it is
+  pure UI glue with no business logic. Any other untestable line uses a per-line
+  `# pragma: no cover`; business logic is never blanket-omitted. _(Supersedes the
+  earlier "no omit / gate deferred" note now that CI exists.)_
 - **Lint: ruff** with `E,F,I,W,UP,B` rule sets and line length 100.
+- **CI: GitHub Actions (`.github/workflows/ci.yml`).** Runs on push and
+  pull_request: checkout → setup-python 3.11 → install → `ruff check` →
+  `pytest`. The 100% coverage gate fails the build (verified locally: adding one
+  uncovered line makes `pytest` exit 1; removing it returns to exit 0).
+
+## Manual GitHub steps (not automated)
+
+These are done in the GitHub UI, not in code:
+
+1. Push a branch / open a PR to trigger the Action for the first time.
+2. Enable branch protection with the CI check as a **required status check**
+   (Settings → Branches).
