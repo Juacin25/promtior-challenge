@@ -34,6 +34,13 @@ this section is filled in.
   pull_request: checkout → setup-python 3.11 → install → `ruff check` →
   `pytest`. The 100% coverage gate fails the build (verified locally: adding one
   uncovered line makes `pytest` exit 1; removing it returns to exit 0).
+- **Domain models: `Booking` references its room by `room_id: str`,** not a
+  `Room` object — avoids duplicating room state and mirrors the SQLite layer
+  (foreign key by id).
+- **Domain entities grouped in one `models.py`.** `Room`, `User` and `Booking`
+  are the shared domain vocabulary and evolve together (high cohesion); no
+  per-class files. They are frozen dataclasses (immutable, value equality) and
+  data-only — all validation lives in `domain/rules.py`.
 
 ## Manual GitHub steps (not automated)
 
