@@ -41,6 +41,17 @@ this section is filled in.
   are the shared domain vocabulary and evolve together (high cohesion); no
   per-class files. They are frozen dataclasses (immutable, value equality) and
   data-only — all validation lives in `domain/rules.py`.
+- **Domain rules are pure functions in `domain/rules.py`.** Each rule (slot
+  alignment, duration ≤ 3h, capacity, title, overlap) is single-responsibility,
+  does no I/O, and takes its inputs directly — the overlap check receives the
+  existing bookings as a list, so the repository supplies data later and rules
+  stay decoupled from persistence.
+- **Flat typed exceptions in `domain/exceptions.py`.** One subclass per rule
+  (`SlotAlignmentError`, `DurationError`, `CapacityError`, `TitleRequiredError`,
+  `OverlapError`) inheriting directly from a single `BookingError` base — no
+  deeper hierarchy (out of scope). Aligns with Issue #14 error handling:
+  surface layer catches `BookingError`; callers can catch a specific rule.
+  Overlap messages stay neutral and never name the conflicting booking's owner.
 
 ## Manual GitHub steps (not automated)
 
