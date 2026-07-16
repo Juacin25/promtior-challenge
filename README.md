@@ -62,6 +62,16 @@ this section is filled in.
 - **Datetimes stored as ISO strings** (`isoformat()` / `fromisoformat()`),
   round-tripping the GMT-3 (-03:00) offset — simple, human-readable storage
   consistent with the app timezone.
+- **Auth: two fixed users defined in code, not the DB.** The brief fixes User1 /
+  User2 as immutable, so they are configuration, not mutable data — this keeps
+  login decoupled from DB state and off the bookings database entirely.
+- **Passwords hashed with bcrypt at module load.** The shared password is a
+  constant used only to derive the hashes in `_CREDENTIALS`; the plaintext is
+  never persisted or logged. Hashing at load (vs. committing precomputed hashes)
+  keeps the source obviously correct and avoids storing a hash literal.
+- **Generic auth error (no user enumeration).** Unknown username and wrong
+  password raise the same `AuthError("Invalid username or password.")`, so
+  failures never reveal which field was wrong. Usernames are case-sensitive.
 
 ## Manual GitHub steps (not automated)
 
