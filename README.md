@@ -72,6 +72,24 @@ this section is filled in.
 - **Generic auth error (no user enumeration).** Unknown username and wrong
   password raise the same `AuthError("Invalid username or password.")`, so
   failures never reveal which field was wrong. Usernames are case-sensitive.
+- **Mutating tools (`create_booking`, `cancel_booking`) are thin LangChain
+  adapters.** They parse LLM args, call `domain/rules` + the repository, and
+  translate results — no business logic inline. The repository is closed over by
+  `build_booking_tools(repo)` rather than being a tool argument, so it never
+  appears in the schema the LLM sees. The logged-in `user` is passed in by the
+  caller; tools do no auth. A missing datetime offset is read as GMT-3 (the app's
+  only timezone).
+- **Two failure channels in the tools, by intent.** Rule violations
+  (`BookingError` subclasses) **propagate** — the tools do *not* catch them, so
+  central translation (#14) handles them uniformly and the tools stay thin.
+  Malformed/unresolvable input (non-ISO datetime, unknown room) instead **returns
+  a message string**, since that is the LLM mis-supplying arguments and a readable
+  string lets it retry with corrected ones.
+- **Cancel ownership + privacy.** `cancel_booking` deletes only if
+  `booking.user == user`. A booking owned by someone else is refused with a
+  generic "you cannot cancel booking '<id>'" that names neither the owner nor any
+  booking detail; an unknown id gets a "not found" message. Ids are opaque
+  8-char uuids, so "not found" reveals nothing enumerable.
 
 ## Manual GitHub steps (not automated)
 

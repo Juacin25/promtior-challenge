@@ -5,6 +5,7 @@ description = "Conversational meeting-room booking chatbot"
 requires-python = ">=3.11"
 dependencies = [
     "langchain",
+    "langchain-core",
     "langchain-openai",
     "streamlit",
     "bcrypt",
