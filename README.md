@@ -72,6 +72,40 @@ this section is filled in.
 - **Generic auth error (no user enumeration).** Unknown username and wrong
   password raise the same `AuthError("Invalid username or password.")`, so
   failures never reveal which field was wrong. Usernames are case-sensitive.
+- **Mutating tools (`create_booking`, `cancel_booking`) are thin LangChain
+  adapters.** They parse LLM args, call `domain/rules` + the repository, and
+  translate results — no business logic inline. The repository is closed over by
+  `build_booking_tools(repo)` rather than being a tool argument, so it never
+  appears in the schema the LLM sees. The logged-in `user` is passed in by the
+  caller; tools do no auth. A missing datetime offset is read as GMT-3 (the app's
+  only timezone).
+- **Two failure channels in the tools, by intent.** Rule violations
+  (`BookingError` subclasses) **propagate** — the tools do *not* catch them, so
+  central translation (#14) handles them uniformly and the tools stay thin.
+  Malformed/unresolvable input (non-ISO datetime, unknown room) instead **returns
+  a message string**, since that is the LLM mis-supplying arguments and a readable
+  string lets it retry with corrected ones.
+- **Cancel ownership + privacy.** `cancel_booking` deletes only if
+  `booking.user == user`. A booking owned by someone else is refused with a
+  generic "you cannot cancel booking '<id>'" that names neither the owner nor any
+  booking detail; an unknown id gets a "not found" message. Ids are opaque
+  8-char uuids, so "not found" reveals nothing enumerable.
+- **Read-only tools reuse the overlap rule, never re-implement it.**
+  `list_available_rooms` and `get_room_schedule` compute freeness through
+  `_is_free`, a thin predicate wrapper around `domain.rules.check_overlap` (probe
+  booking → catch `OverlapError`), so overlap logic stays defined in exactly one
+  place.
+- **"Available"/"free" = fully free for the entire requested range.** The brief
+  doesn't define partial availability, so a room counts as available only if no
+  existing booking overlaps *any* part of the range; back-to-back bookings
+  (touching endpoints) leave the room free.
+- **`list_available_rooms` optional `attendees` capacity filter.** With
+  `attendees` omitted it lists all fully-free rooms; with it set, only free rooms
+  whose capacity ≥ attendees. One tool serves both "show free rooms" and "show
+  free rooms that fit my group" without a separate feature. Output is
+  deterministic alphabetical (A→E).
+- **`get_room_schedule` walks fixed 30-minute slots** from start to end, marking
+  each free/occupied via the same `_is_free` predicate — read-only, no mutation.
 
 ## Manual GitHub steps (not automated)
 
