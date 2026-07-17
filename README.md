@@ -5,8 +5,8 @@
 Conversational chatbot for booking, listing, inspecting, and cancelling meeting rooms A–E at
 Promtior's Cubo Itaú office. The implemented foundation currently includes the pure booking
 domain, SQLite persistence, fixed-user authentication, four LangChain booking tools, and the
-OpenAI model/prompt configuration and guardrail-classification units. The agent orchestrator,
-output verifier, and user interface are not yet implemented.
+OpenAI model/prompt configuration, input guardrail, and output-verifier units. The agent
+orchestrator and user interface are not yet implemented.
 
 ## Architecture
 
@@ -29,7 +29,8 @@ app/
 │   └── booking_tools.py # Four LangChain adapters over rules + repository
 ├── agent/
 │   ├── llm.py          # ChatOpenAI factory and grounded prompt builder
-│   └── guardrail.py    # Conservative SAFE/UNSAFE input classifier
+│   ├── guardrail.py    # Conservative SAFE/UNSAFE input classifier
+│   └── verifier.py     # Draft-answer grounding check against tool output
 ├── cache/__init__.py   # Empty package marker; semantic cache not built
 └── ui/__init__.py      # Empty package marker; Streamlit UI not built
 ```
@@ -45,6 +46,7 @@ app/
 | `tools/booking_tools.py` | Builds `create_booking`, `cancel_booking`, `list_available_rooms`, and `get_room_schedule`. It parses/returns LLM-friendly strings and delegates state to `BookingRepository` and validation to `domain.rules`. | LangChain is an outer adapter. Closing over the repository keeps infrastructure out of the LLM-visible tool schemas and keeps business rules in the domain. |
 | `agent/llm.py` | Loads OpenAI configuration and builds the deterministic grounded system prompt. It contains no booking rules and does not bind tools. | Model-provider configuration is isolated from both business behavior and the future orchestration loop. Its injected datetime makes prompt construction testable and deterministic. |
 | `agent/guardrail.py` | Uses an injected LLM and a strict structured-output prompt to classify one incoming message as SAFE or UNSAFE, returning a frozen `GuardrailResult`. It has no DB access, tool calls, or booking logic. | Input security is an agent-layer concern. Injecting the already-configured LLM avoids hidden construction/configuration and makes the classifier deterministic under test. |
+| `agent/verifier.py` | Uses an injected LLM to compare a draft answer with this turn's serialized tool outputs, returning a frozen `VerifierResult` and an unsupported-claim reason when needed. It has no DB access, tool calls, or booking logic. | Output grounding is an agent-layer concern. Injecting the configured LLM and passing evidence explicitly keeps verification deterministic under test and separate from orchestration. |
 
 The domain depends only on the standard library. `data` and `auth` depend inward on domain
 types; `tools` depends on the domain and data abstractions plus LangChain. SQL is confined to
@@ -67,8 +69,13 @@ implementation state is:
    LLM-callable tool definitions that create a booking, cancel an owned booking, list rooms fully
    free for a range, and show a room's 30-minute schedule. Issue #8 provides the grounded system
    prompt and model factory. No agent currently binds or invokes them together.
-3. **Output verifier (not implemented):** the verifier and orchestrator remain future work. Issue
-   #11 will coordinate the three-step flow.
+3. **Output verifier (implemented, not wired):** As the final per-message step,
+   `verify_response(draft_answer, tool_outputs, llm)` compares the drafted response with only the
+   tool evidence produced in that turn. Room, availability, capacity, time, and booking claims
+   must be supported. Greetings, conversational phrasing, and clarification questions are
+   grounded; with no tool output, only those non-factual responses are grounded. An ungrounded
+   result names the unsupported claim for the orchestrator to handle without exposing internal
+   prompt or system details.
 
 The primary defense is architectural: the future booking agent can call only constrained tools,
 which use parameterized repository queries, fixed rooms, and an ownership check on cancellation;
@@ -77,6 +84,18 @@ sole security boundary.
 When wired, it adds one LLM call per message, increasing latency and input-token cost. Reusing
 the stable classifier prefix with the configured OpenAI prompt cache can mitigate eligible calls.
 
+Anti-hallucination is deliberately layered across the full flow:
+
+1. The Issue #8 system prompt requires every booking fact to be grounded in tool output.
+2. The constrained booking tools are the only permitted source of room, availability, capacity,
+   time, and booking facts.
+3. The output verifier runs last and checks the draft against this turn's actual tool outputs.
+
+No single layer is a complete guarantee; robustness comes from their combination. In particular,
+the verifier is itself LLM-based, so it reduces but cannot eliminate hallucination. Once wired
+after draft generation, it adds another LLM call and therefore more latency/input-token cost; its
+stable prompt can also benefit from eligible prompt caching.
+
 Issue #8, now implemented, provides `build_llm` and `build_system_prompt`. The prompt requires
 availability, capacity, booking, and schedule claims to come from tool calls; it also restricts
 the assistant to rooms A–E. The prompt builder receives the logged-in username and current
@@ -84,10 +103,9 @@ datetime from its caller, converts the time to fixed GMT-3 (`-03:00`), and suppl
 today/tomorrow anchors in 24-hour format. It never reads the clock itself. The tools accept
 absolute ISO datetimes and treat a missing offset as GMT-3.
 
-Until Issue #11 wires the components, no component invokes the guardrail, booking tools, or LLM
-as an agent, and no output verifier enforces grounding at runtime. Conversation memory, the
-Streamlit chat flow, and the semantic cache are also not implemented. Bookings alone currently
-have persistence through SQLite.
+Until Issue #11 wires the components, no component invokes the guardrail, booking tools, or
+verifier as an agent. Conversation memory, the Streamlit chat flow, and the semantic cache are
+also not implemented. Bookings alone currently have persistence through SQLite.
 
 OpenAI prompt caching is engaged with the stable model-level key
 `promtior-booking-agent-v1`, passed by `langchain-openai` as `prompt_cache_key`. OpenAI performs
@@ -272,3 +290,21 @@ Entries are grouped chronologically by the issue that introduced the implemented
   input-token cost. Stable classifier prompts and the configured OpenAI prompt cache mitigate
   eligible repeated prefixes, while Issue #11 remains responsible for calling the guardrail
   before the booking agent.
+
+### Issue #10 — Output verifier
+
+- **The verifier is a second grounding check after draft generation.** The primary mechanism is
+  the Issue #8 system prompt requiring room, availability, capacity, time, and booking facts to
+  come from tools. The verifier compares the draft only with this turn's tool outputs and reports
+  an unsupported claim; it does not replace prompt grounding or tool constraints.
+- **The configured LLM and evidence are injected into `verify_response`.** The verifier builds no
+  model and accesses neither the DB nor booking rules. Tool outputs are serialized with the draft
+  as evidence for one strict structured decision, producing a frozen `VerifierResult`.
+- **Non-factual no-tool turns are grounded.** Greetings, conversational phrasing, and requests
+  for clarification do not require tool evidence, preventing the verifier from over-flagging
+  normal dialogue. Specific room or booking facts still require tool support even when the turn
+  contains no tool output.
+- **Output verification costs one extra LLM call after each draft once wired.** This adds latency
+  and input-token cost on top of the guardrail and booking calls. Stable verifier prompts and the
+  configured OpenAI prompt cache mitigate eligible repeated prefixes; Issue #11 remains
+  responsible for invoking the verifier last and deciding whether to regenerate or fall back.
