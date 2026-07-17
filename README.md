@@ -7,15 +7,71 @@ rooms (A–E) at Promtior's Cubo Itaú office via natural language.
 
 ## Architecture
 
-Clean-Architecture layering under `app/` (`domain` → `data` → `auth` → `tools` →
-`agent` → `cache` → `ui`); dependencies point inward. Full layer descriptions and
-boundary justifications live in [CLAUDE.md](CLAUDE.md).
+Clean-Architecture layering keeps dependencies pointing inward and business rules independent
+of SQLite, LangChain, OpenAI, and Streamlit:
+
+```text
+app/
+├── domain/             # Pure entities, booking rules, and domain errors
+├── data/               # SQLite schema and repository; the only SQL boundary
+├── auth/               # Login for the two fixed challenge users
+├── tools/              # Thin LangChain adapters around application operations
+├── agent/
+│   ├── llm.py          # ChatOpenAI factory and grounded system-prompt builder
+│   ├── guardrail.py    # Input security classifier (planned)
+│   ├── verifier.py     # Output grounding check (planned)
+│   └── orchestrator.py # Guardrail → booking agent → verifier wiring (Issue #11)
+├── cache/              # Static-data-only semantic cache (planned)
+└── ui/                 # Thin Streamlit login/chat adapter (planned)
+```
+
+`app/agent/llm.py` owns only LLM configuration and system-prompt construction; it contains no
+booking rules, tool wiring, or other business logic. Its prompt builder receives the current
+datetime instead of reading the clock. This makes the GMT-3 anchor deterministic in tests and
+lets the caller define exactly when a turn starts. Domain rules remain pure and testable,
+repositories hide SQL, tools translate between model arguments and application operations, and
+the orchestrator coordinates the agent flow without absorbing business rules.
 
 ## AI Workflow
 
-_Placeholder._ Per user message, three LLM roles run in sequence (guardrail →
-booking agent → output verifier). See [CLAUDE.md](CLAUDE.md#ai-workflow) until
-this section is filled in.
+Per user message, three roles run in sequence: **guardrail → booking agent → output verifier**.
+The guardrail blocks prompt injection and improper data-extraction attempts. The booking agent
+selects parameterized application tools; it never writes SQL. The verifier checks that the draft
+answer is supported by tool results before it reaches the user. This defense-in-depth flow costs
+extra calls, so prompt caching is used to reduce repeated input-token work.
+
+The booking system prompt enforces grounding: availability, capacity, bookings, schedules, and
+all other room state must come from a tool call and must never be asserted from model memory. It
+also limits the assistant to meeting-room operations for rooms A–E and requires unrelated
+requests to be refused. Per turn, the caller passes the current datetime and logged-in username
+to `build_system_prompt`. The builder converts the anchor to fixed GMT-3 (`-03:00`), states the
+absolute current datetime, today's date, and tomorrow's date, and requires 24-hour absolute ISO
+datetimes for tool arguments. It never reads the system clock itself.
+
+This ticket provides the LLM-config layer only. Issue #11 will bind the booking tools in a fixed
+order and coordinate the guardrail, booking, and verifier roles; no tools are wired in
+`llm.py`. Conversation history will live in the Streamlit session, while bookings persist in
+SQLite. State-dependent booking results are never semantically cached.
+
+OpenAI prompt caching is engaged with the stable model-level key
+`promtior-booking-agent-v1`, passed by `langchain-openai` as `prompt_cache_key`. OpenAI performs
+the cache server-side automatically for eligible prompts (currently prompts of at least 1,024
+tokens), and cache hits require an exact matching prefix. Accordingly, reusable grounding and
+scope instructions appear first in the system prompt, while the changing datetime and username
+appear at the end. When Issue #11 binds tool definitions, it must preserve their content and
+ordering so the repeated system-prefix/tool-definition input remains reusable. There is no local
+prompt-response cache and no claim that short, ineligible prompts produce a cache hit; usage can
+be observed through the API response's cached-token metadata.
+
+## Environment and configuration
+
+Copy `.env.example` to `.env` for local development. `.env` is gitignored and must never be
+committed.
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | Yes | OpenAI credential loaded with `python-dotenv`; never logged or hardcoded. |
+| `OPENAI_MODEL` | No | Chat model name. Defaults to `gpt-4o-mini`, a cost-effective model with tool-calling support. |
 
 ## Decision Log
 
@@ -106,6 +162,25 @@ this section is filled in.
   deterministic alphabetical (A→E).
 - **`get_room_schedule` walks fixed 30-minute slots** from start to end, marking
   each free/occupied via the same `_is_free` predicate — read-only, no mutation.
+- **Default LLM: `gpt-4o-mini`, configurable with `OPENAI_MODEL`.** It is a
+  cost-effective tool-calling default for the booking agent, while the environment
+  override allows deployments to change models without a code edit. `OPENAI_API_KEY`
+  is loaded from the environment/`.env` and is never hardcoded or logged.
+- **LLM temperature is `0`.** Booking-tool selection and responses should be as
+  repeatable as the model API permits, which improves predictability and testability
+  for an operational workflow.
+- **Grounding and scope live in the system prompt as explicit clauses.** The assistant
+  must call tools before claiming availability, capacity, bookings, schedules, or any
+  other current state; it cannot rely on memory. It serves only booking operations for
+  rooms A–E and refuses unrelated requests. This complements, rather than replaces,
+  the guardrail → booking agent → verifier architecture.
+- **Prompt caching uses OpenAI's server-side automatic prefix cache plus an explicit
+  `prompt_cache_key`.** `ChatOpenAI` receives the stable key
+  `promtior-booking-agent-v1` through `model_kwargs`; static prompt instructions come
+  before the per-turn datetime/username suffix. Eligible requests (currently at least
+  1,024 prompt tokens) can reuse exact prefixes. Issue #11 must bind unchanged tool
+  definitions in stable order so they participate in the reusable request input; this
+  layer does not wire tools or maintain a separate local response cache.
 
 ## Manual GitHub steps (not automated)
 
