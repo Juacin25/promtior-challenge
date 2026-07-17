@@ -90,6 +90,22 @@ this section is filled in.
   generic "you cannot cancel booking '<id>'" that names neither the owner nor any
   booking detail; an unknown id gets a "not found" message. Ids are opaque
   8-char uuids, so "not found" reveals nothing enumerable.
+- **Read-only tools reuse the overlap rule, never re-implement it.**
+  `list_available_rooms` and `get_room_schedule` compute freeness through
+  `_is_free`, a thin predicate wrapper around `domain.rules.check_overlap` (probe
+  booking → catch `OverlapError`), so overlap logic stays defined in exactly one
+  place.
+- **"Available"/"free" = fully free for the entire requested range.** The brief
+  doesn't define partial availability, so a room counts as available only if no
+  existing booking overlaps *any* part of the range; back-to-back bookings
+  (touching endpoints) leave the room free.
+- **`list_available_rooms` optional `attendees` capacity filter.** With
+  `attendees` omitted it lists all fully-free rooms; with it set, only free rooms
+  whose capacity ≥ attendees. One tool serves both "show free rooms" and "show
+  free rooms that fit my group" without a separate feature. Output is
+  deterministic alphabetical (A→E).
+- **`get_room_schedule` walks fixed 30-minute slots** from start to end, marking
+  each free/occupied via the same `_is_free` predicate — read-only, no mutation.
 
 ## Manual GitHub steps (not automated)
 

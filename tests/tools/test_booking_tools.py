@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -24,8 +25,7 @@ def repo(tmp_path):
 
 @pytest.fixture
 def tools(repo):
-    create, cancel = build_booking_tools(repo)
-    return create, cancel
+    return build_booking_tools(repo)
 
 
 @pytest.fixture
@@ -36,6 +36,16 @@ def create(tools):
 @pytest.fixture
 def cancel(tools):
     return tools[1]
+
+
+@pytest.fixture
+def list_rooms(tools):
+    return tools[2]
+
+
+@pytest.fixture
+def schedule(tools):
+    return tools[3]
 
 
 def args(**overrides):
@@ -183,3 +193,106 @@ def test_cancel_of_unknown_and_of_others_booking_are_indistinguishable_in_effect
     cancel.invoke({"booking_id": "b1", "user": "User1"})
     cancel.invoke({"booking_id": "b2", "user": "User1"})
     assert repo.find_by_id("b1") is not None
+
+
+# --- list_available_rooms -------------------------------------------------
+
+
+def occupy(repo, room_id, start="2026-07-18T09:00:00-03:00", end="2026-07-18T10:00:00-03:00"):
+    repo.save(
+        Booking(
+            id=f"occ-{room_id}",
+            room_id=room_id,
+            user="User1",
+            title="Busy",
+            start=datetime.fromisoformat(start),
+            end=datetime.fromisoformat(end),
+        )
+    )
+
+
+def rooms_in(result):
+    return set(re.findall(r"\b[A-E]\b", result))
+
+
+RANGE = {"start": "2026-07-18T09:00:00-03:00", "end": "2026-07-18T10:00:00-03:00"}
+
+
+def test_list_no_attendees_returns_all_free_rooms_alphabetical(list_rooms, repo):
+    result = list_rooms.invoke(dict(RANGE))
+    assert rooms_in(result) == {"A", "B", "C", "D", "E"}
+    # Deterministic A→E ordering.
+    assert re.findall(r"\b[A-E]\b", result) == ["A", "B", "C", "D", "E"]
+
+
+def test_list_excludes_occupied_rooms(list_rooms, repo):
+    occupy(repo, "C")
+    assert rooms_in(list_rooms.invoke(dict(RANGE))) == {"A", "B", "D", "E"}
+
+
+def test_list_partial_overlap_still_excludes(list_rooms, repo):
+    # A booking touching only part of the range makes the room not fully free.
+    occupy(repo, "D", start="2026-07-18T09:30:00-03:00", end="2026-07-18T10:30:00-03:00")
+    assert "D" not in rooms_in(list_rooms.invoke(dict(RANGE)))
+
+
+def test_list_back_to_back_room_stays_free(list_rooms, repo):
+    occupy(repo, "E", start="2026-07-18T10:00:00-03:00", end="2026-07-18T10:30:00-03:00")
+    assert "E" in rooms_in(list_rooms.invoke(dict(RANGE)))
+
+
+def test_list_with_attendees_2_includes_capacity_2_rooms(list_rooms, repo):
+    assert rooms_in(list_rooms.invoke({**RANGE, "attendees": 2})) == {"A", "B", "C", "D", "E"}
+
+
+def test_list_with_attendees_3_excludes_capacity_2_rooms(list_rooms, repo):
+    assert rooms_in(list_rooms.invoke({**RANGE, "attendees": 3})) == {"C", "D", "E"}
+
+
+def test_list_with_attendees_excludes_occupied_too(list_rooms, repo):
+    occupy(repo, "C")
+    assert rooms_in(list_rooms.invoke({**RANGE, "attendees": 3})) == {"D", "E"}
+
+
+def test_list_no_free_rooms_message(list_rooms, repo):
+    for room in "ABCDE":
+        occupy(repo, room)
+    result = list_rooms.invoke(dict(RANGE))
+    assert rooms_in(result) == set()
+    assert "no" in result.lower()
+
+
+def test_list_rejects_non_iso(list_rooms, repo):
+    assert "ISO" in list_rooms.invoke({"start": "soon", "end": "later"})
+
+
+# --- get_room_schedule ----------------------------------------------------
+
+
+def test_schedule_marks_free_and_occupied_slots(schedule, repo):
+    occupy(repo, "C", start="2026-07-18T09:30:00-03:00", end="2026-07-18T10:00:00-03:00")
+    result = schedule.invoke(
+        {"room_id": "C", "start": "2026-07-18T09:00:00-03:00", "end": "2026-07-18T11:00:00-03:00"}
+    )
+    assert "09:00-09:30 free" in result
+    assert "09:30-10:00 occupied" in result
+    assert "10:00-10:30 free" in result
+    assert "10:30-11:00 free" in result
+
+
+def test_schedule_is_read_only(schedule, repo):
+    occupy(repo, "C")
+    before = len(repo.find_by_room("C"))
+    schedule.invoke(
+        {"room_id": "C", "start": "2026-07-18T09:00:00-03:00", "end": "2026-07-18T10:00:00-03:00"}
+    )
+    assert len(repo.find_by_room("C")) == before
+
+
+def test_schedule_rejects_unknown_room(schedule, repo):
+    result = schedule.invoke({"room_id": "Z", **RANGE})
+    assert "Z" in result and "A, B, C, D, E" in result
+
+
+def test_schedule_rejects_non_iso(schedule, repo):
+    assert "ISO" in schedule.invoke({"room_id": "C", "start": "soon", "end": "later"})
