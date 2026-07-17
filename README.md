@@ -5,8 +5,8 @@
 Conversational chatbot for booking, listing, inspecting, and cancelling meeting rooms A–E at
 Promtior's Cubo Itaú office. The implemented foundation currently includes the pure booking
 domain, SQLite persistence, fixed-user authentication, four LangChain booking tools, and the
-OpenAI model/prompt configuration layer. The agent orchestrator and user interface are not yet
-implemented.
+OpenAI model/prompt configuration and guardrail-classification units. The agent orchestrator,
+output verifier, and user interface are not yet implemented.
 
 ## Architecture
 
@@ -28,7 +28,8 @@ app/
 ├── tools/
 │   └── booking_tools.py # Four LangChain adapters over rules + repository
 ├── agent/
-│   └── llm.py          # ChatOpenAI factory and grounded prompt builder
+│   ├── llm.py          # ChatOpenAI factory and grounded prompt builder
+│   └── guardrail.py    # Conservative SAFE/UNSAFE input classifier
 ├── cache/__init__.py   # Empty package marker; semantic cache not built
 └── ui/__init__.py      # Empty package marker; Streamlit UI not built
 ```
@@ -43,6 +44,7 @@ app/
 | `auth/auth.py` | Authenticates the two fixed, case-sensitive challenge users using bcrypt hashes and returns a domain `User`. It does not use the bookings database. | The users are immutable challenge configuration, so a separate auth adapter avoids introducing mutable user persistence, roles, JWT, or session logic. |
 | `tools/booking_tools.py` | Builds `create_booking`, `cancel_booking`, `list_available_rooms`, and `get_room_schedule`. It parses/returns LLM-friendly strings and delegates state to `BookingRepository` and validation to `domain.rules`. | LangChain is an outer adapter. Closing over the repository keeps infrastructure out of the LLM-visible tool schemas and keeps business rules in the domain. |
 | `agent/llm.py` | Loads OpenAI configuration and builds the deterministic grounded system prompt. It contains no booking rules and does not bind tools. | Model-provider configuration is isolated from both business behavior and the future orchestration loop. Its injected datetime makes prompt construction testable and deterministic. |
+| `agent/guardrail.py` | Uses an injected LLM and a strict structured-output prompt to classify one incoming message as SAFE or UNSAFE, returning a frozen `GuardrailResult`. It has no DB access, tool calls, or booking logic. | Input security is an agent-layer concern. Injecting the already-configured LLM avoids hidden construction/configuration and makes the classifier deterministic under test. |
 
 The domain depends only on the standard library. `data` and `auth` depend inward on domain
 types; `tools` depends on the domain and data abstractions plus LangChain. SQL is confined to
@@ -52,11 +54,28 @@ All queries with external values are parameterized.
 
 ## AI Workflow
 
-The target design is **guardrail → booking agent → output verifier**, but that sequence is not
-yet executable: the guardrail, verifier, and orchestrator modules do not exist. Issue #7 provides
-the four LLM-callable tool definitions. They can create a booking, cancel an owned booking, list
-rooms fully free for a range, and show a room's 30-minute schedule. Tools never write arbitrary
-SQL; they call the parameterized repository and domain rules.
+The target per-message design is **guardrail → booking agent → output verifier**. Its current
+implementation state is:
+
+1. **Guardrail (implemented, not wired):** `check_message(message, llm)` performs one strict
+   structured LLM classification before any future booking-agent call. It marks clear prompt
+   injection, improper data extraction, SQL-injection-looking input, and rule/scope-breaking
+   requests UNSAFE. Ordinary booking language—including unusual or ambiguous phrasing—defaults
+   to SAFE to minimize false positives. Unsafe results contain one neutral refusal and expose no
+   classifier, prompt, database, or other-user details.
+2. **Booking agent (components implemented, loop not wired):** Issue #7 provides four
+   LLM-callable tool definitions that create a booking, cancel an owned booking, list rooms fully
+   free for a range, and show a room's 30-minute schedule. Issue #8 provides the grounded system
+   prompt and model factory. No agent currently binds or invokes them together.
+3. **Output verifier (not implemented):** the verifier and orchestrator remain future work. Issue
+   #11 will coordinate the three-step flow.
+
+The primary defense is architectural: the future booking agent can call only constrained tools,
+which use parameterized repository queries, fixed rooms, and an ownership check on cancellation;
+it has no arbitrary-SQL surface. The LLM guardrail is a second layer for clear abuse, not the
+sole security boundary.
+When wired, it adds one LLM call per message, increasing latency and input-token cost. Reusing
+the stable classifier prefix with the configured OpenAI prompt cache can mitigate eligible calls.
 
 Issue #8, now implemented, provides `build_llm` and `build_system_prompt`. The prompt requires
 availability, capacity, booking, and schedule claims to come from tool calls; it also restricts
@@ -65,11 +84,10 @@ datetime from its caller, converts the time to fixed GMT-3 (`-03:00`), and suppl
 today/tomorrow anchors in 24-hour format. It never reads the clock itself. The tools accept
 absolute ISO datetimes and treat a missing offset as GMT-3.
 
-Issue #11 will bind the current prompt, model, tool definitions, and future guardrail/verifier
-into the per-message loop. Until then, no component invokes the LLM or tools as an agent, and no
-output verifier enforces grounding at runtime. Conversation memory, the Streamlit chat flow, and
-the semantic cache are also not implemented. Bookings alone currently have persistence through
-SQLite.
+Until Issue #11 wires the components, no component invokes the guardrail, booking tools, or LLM
+as an agent, and no output verifier enforces grounding at runtime. Conversation memory, the
+Streamlit chat flow, and the semantic cache are also not implemented. Bookings alone currently
+have persistence through SQLite.
 
 OpenAI prompt caching is engaged with the stable model-level key
 `promtior-booking-agent-v1`, passed by `langchain-openai` as `prompt_cache_key`. OpenAI performs
@@ -235,3 +253,22 @@ Entries are grouped chronologically by the issue that introduced the implemented
   1,024 prompt tokens) can reuse exact prefixes. Issue #11 must bind unchanged tool
   definitions in stable order so they participate in the reusable request input; this
   layer does not wire tools or maintain a separate local response cache.
+
+### Issue #9 — Guardrail input classifier
+
+- **The guardrail is a second layer of defense, not the security boundary.** It blocks clear
+  prompt injection, improper data extraction, SQL-injection-looking text, and attempts to break
+  booking scope/rules. The primary defense remains the constrained, parameterized booking-tool
+  architecture, which exposes no arbitrary-SQL operation.
+- **The configured LLM is injected into `check_message`.** The guardrail neither builds a model
+  nor accesses the DB or booking rules. A strict structured classification is converted into a
+  small frozen `GuardrailResult`; UNSAFE messages receive one neutral refusal that discloses no
+  internal reason or data.
+- **Classification defaults to SAFE for ordinary booking language.** Only clear abuse is marked
+  UNSAFE, including when legitimate booking phrasing is unusual or ambiguous. This deliberately
+  minimizes false positives; the constrained tool layer still enforces actual permissions and
+  booking rules.
+- **Defense in depth costs one extra LLM call per message once wired.** That adds latency and
+  input-token cost. Stable classifier prompts and the configured OpenAI prompt cache mitigate
+  eligible repeated prefixes, while Issue #11 remains responsible for calling the guardrail
+  before the booking agent.
