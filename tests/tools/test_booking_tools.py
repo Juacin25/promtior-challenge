@@ -169,7 +169,8 @@ def test_cancel_rejects_other_users_booking_without_deleting(cancel, repo):
     seed(repo, user="User2")
     result = cancel.invoke({"booking_id": "b1", "user": "User1"})
     assert repo.find_by_id("b1") is not None
-    assert "cannot cancel" in result.lower()
+    assert "couldn't cancel" in result.lower()
+    assert "b1" not in result
 
 
 def test_cancel_never_leaks_the_owner_identity(cancel, repo):
@@ -181,17 +182,19 @@ def test_cancel_never_leaks_the_owner_identity(cancel, repo):
     assert "C" not in result
 
 
-def test_cancel_unknown_id_reports_not_found(cancel, repo):
+def test_cancel_unknown_id_returns_private_generic_message(cancel, repo):
     result = cancel.invoke({"booking_id": "nope", "user": "User1"})
-    assert "not found" in result.lower()
+    assert "couldn't cancel" in result.lower()
+    assert "nope" not in result
 
 
 def test_cancel_of_unknown_and_of_others_booking_are_indistinguishable_in_effect(cancel, repo):
-    # Both refuse; neither deletes. (Messages differ, which is acceptable:
-    # ids are opaque uuids, so "not found" reveals nothing enumerable.)
     seed(repo, id="b1", user="User2")
-    cancel.invoke({"booking_id": "b1", "user": "User1"})
-    cancel.invoke({"booking_id": "b2", "user": "User1"})
+    denied = cancel.invoke({"booking_id": "b1", "user": "User1"})
+    missing = cancel.invoke({"booking_id": "b2", "user": "User1"})
+    assert denied == missing
+    assert "b1" not in denied
+    assert "b2" not in missing
     assert repo.find_by_id("b1") is not None
 
 

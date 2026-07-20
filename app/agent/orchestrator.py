@@ -8,6 +8,7 @@ from sqlite3 import Connection
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 
+from app.agent.error_presentation import present_booking_error
 from app.agent.guardrail import check_message
 from app.agent.llm import build_system_prompt
 from app.agent.verifier import verify_response
@@ -98,7 +99,7 @@ def _run_booking_agent(
             try:
                 output = str(tools_by_name[tool_name].invoke(tool_call["args"]))
             except BookingError as error:
-                message = f"I couldn't complete that booking: {error}"
+                message = present_booking_error(error)
                 tool_outputs.append({"tool": tool_name, "output": message})
                 return message, tool_outputs
 
