@@ -73,9 +73,7 @@ def test_create_saves_booking_and_confirms(create, repo):
     assert booking.start == datetime(2026, 7, 18, 9, 0, tzinfo=GMT3)
     assert booking.end == datetime(2026, 7, 18, 10, 0, tzinfo=GMT3)
     assert booking.attendees == 3
-    # The raw tool keeps the internal id; the agent adapter strips it before presentation.
-    assert booking.id in result
-    assert "C" in result
+    assert result == booking
 
 
 def test_create_ties_booking_to_the_passed_user(create, repo):
@@ -91,10 +89,21 @@ def test_create_generates_unique_ids(create, repo):
     assert len(ids) == 2
 
 
-def test_create_accepts_naive_iso_as_gmt3(create, repo):
-    # The LLM may drop the offset; GMT-3 is the app's only timezone.
-    create.invoke(args(start="2026-07-18T09:00:00", end="2026-07-18T09:30:00"))
-    assert repo.find_by_room("C")[0].start == datetime(2026, 7, 18, 9, 0, tzinfo=GMT3)
+def test_create_rejects_offsetless_input_without_saving(create, repo):
+    result = create.invoke(
+        args(start="2026-07-18T09:00:00", end="2026-07-18T09:30:00")
+    )
+    assert "-03:00" in result
+    assert repo.find_by_room("C") == []
+
+
+def test_create_rejects_foreign_offset_instead_of_converting(create, repo):
+    result = create.invoke(
+        args(start="2026-07-18T20:00:00+00:00", end="2026-07-18T21:00:00+00:00")
+    )
+
+    assert "-03:00" in result
+    assert repo.find_by_room("C") == []
 
 
 def test_create_rejects_non_iso_datetime_without_saving(create, repo):
@@ -147,24 +156,24 @@ def test_create_overlap_is_scoped_to_the_room(create, repo):
 
 
 def seed(repo, id="b1", user="User1"):
-    repo.save(
-        Booking(
-            id=id,
-            room_id="C",
-            user=user,
-            title="Standup",
-            attendees=3,
-            start=datetime(2026, 7, 18, 9, 0, tzinfo=GMT3),
-            end=datetime(2026, 7, 18, 9, 30, tzinfo=GMT3),
-        )
+    booking = Booking(
+        id=id,
+        room_id="C",
+        user=user,
+        title="Standup",
+        attendees=3,
+        start=datetime(2026, 7, 18, 9, 0, tzinfo=GMT3),
+        end=datetime(2026, 7, 18, 9, 30, tzinfo=GMT3),
     )
+    repo.save(booking)
+    return booking
 
 
 def test_cancel_removes_own_booking(cancel, repo):
-    seed(repo, user="User1")
+    booking = seed(repo, user="User1")
     result = cancel.invoke({"booking_id": "b1", "user": "User1"})
     assert repo.find_by_id("b1") is None
-    assert "b1" in result
+    assert result == booking
 
 
 def test_cancel_rejects_other_users_booking_without_deleting(cancel, repo):
@@ -272,6 +281,14 @@ def test_list_rejects_non_iso(list_rooms, repo):
     assert "ISO" in list_rooms.invoke({"start": "soon", "end": "later"})
 
 
+def test_list_rejects_foreign_offset_instead_of_converting(list_rooms):
+    result = list_rooms.invoke(
+        {"start": "2026-07-18T20:00:00+00:00", "end": "2026-07-18T21:00:00+00:00"}
+    )
+
+    assert "-03:00" in result
+
+
 # --- get_room_schedule ----------------------------------------------------
 
 
@@ -302,3 +319,26 @@ def test_schedule_rejects_unknown_room(schedule, repo):
 
 def test_schedule_rejects_non_iso(schedule, repo):
     assert "ISO" in schedule.invoke({"room_id": "C", "start": "soon", "end": "later"})
+
+
+def test_schedule_rejects_misaligned_range_instead_of_widening(schedule):
+    with pytest.raises(SlotAlignmentError):
+        schedule.invoke(
+            {
+                "room_id": "C",
+                "start": "2026-07-18T09:15:00-03:00",
+                "end": "2026-07-18T10:00:00-03:00",
+            }
+        )
+
+
+def test_schedule_rejects_foreign_offset_instead_of_converting(schedule):
+    result = schedule.invoke(
+        {
+            "room_id": "C",
+            "start": "2026-07-18T20:00:00+00:00",
+            "end": "2026-07-18T21:00:00+00:00",
+        }
+    )
+
+    assert "-03:00" in result

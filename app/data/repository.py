@@ -5,9 +5,15 @@ lists this repository returns).
 """
 
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.domain.models import Booking
+
+
+def _require_gmt3(value: datetime) -> datetime:
+    if value.utcoffset() != timedelta(hours=-3):
+        raise ValueError("Booking datetimes must use the GMT-3 (-03:00) offset.")
+    return value
 
 
 def _to_booking(row: sqlite3.Row) -> Booking:
@@ -17,8 +23,8 @@ def _to_booking(row: sqlite3.Row) -> Booking:
         user=row[2],
         title=row[3],
         attendees=row[4],
-        start=datetime.fromisoformat(row[5]),
-        end=datetime.fromisoformat(row[6]),
+        start=_require_gmt3(datetime.fromisoformat(row[5])),
+        end=_require_gmt3(datetime.fromisoformat(row[6])),
     )
 
 
@@ -38,8 +44,8 @@ class BookingRepository:
                 booking.user,
                 booking.title,
                 booking.attendees,
-                booking.start.isoformat(),
-                booking.end.isoformat(),
+                _require_gmt3(booking.start).isoformat(),
+                _require_gmt3(booking.end).isoformat(),
             ),
         )
         self._conn.commit()

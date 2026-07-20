@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
 
 import pytest
@@ -86,7 +87,8 @@ def test_blank_title_is_requested_without_calling_create(title):
         ),
         (
             {"end": "2026-07-21T18:00:00-03:00"},
-            "Please choose a range that ends after it starts and lasts no more than 3 hours.",
+            "A booking can last at most 3 hours; the requested range is "
+            "3 hours 30 minutes. Please choose a shorter range.",
         ),
         (
             {"attendees": 9},
@@ -130,7 +132,8 @@ def test_unknown_room_is_left_to_the_authoritative_tool():
 def test_system_prompt_requires_all_five_fields_without_defaults():
     prompt = " ".join(
         build_system_prompt(
-            __import__("datetime").datetime(2026, 7, 20, 10), "User1"
+            datetime(2026, 7, 20, 10, tzinfo=timezone(timedelta(hours=-3))),
+            "User1",
         ).lower().split()
     )
 

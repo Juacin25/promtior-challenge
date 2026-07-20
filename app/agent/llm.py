@@ -22,11 +22,9 @@ def build_llm() -> ChatOpenAI:
 
 def build_system_prompt(current_dt: datetime, username: str) -> str:
     """Build the grounded booking prompt with deterministic per-turn context."""
-    anchor = (
-        current_dt.replace(tzinfo=GMT_MINUS_3)
-        if current_dt.tzinfo is None
-        else current_dt.astimezone(GMT_MINUS_3)
-    )
+    if current_dt.utcoffset() != GMT_MINUS_3.utcoffset(None):
+        raise ValueError("current_dt must use the GMT-3 (-03:00) offset.")
+    anchor = current_dt
     tomorrow = anchor.date() + timedelta(days=1)
 
     # Keep reusable instructions first; dynamic context belongs at the end for prefix caching.
@@ -35,8 +33,9 @@ listing, inspecting, and cancelling bookings for rooms A-E. Politely refuse unre
 
 Ground every room or booking fact in tool output. Never invent or infer availability, capacity,
 bookings, schedules, or other current state from memory. Any such claim must come from a tool call.
-Tools receive absolute ISO datetimes. Convert relative user phrasing with the turn context below,
-use 24-hour time, and include the GMT-3 (-03:00) offset.
+Tools receive GMT-3 ISO datetimes. Resolve relative dates with the turn context below, preserve
+the user's clock time, use 24-hour time, and include the GMT-3 (-03:00) offset. Never convert a
+datetime to another offset.
 
 Before calling create_booking, collect all five required fields: room, date, start and end time,
 meeting title, and attendee count. If anything is missing, ask for every missing field and wait.
@@ -54,14 +53,24 @@ the attendee count. Present every matching room and ask the user to choose. Neve
 for the user, even when exactly one room matches. If none match, say so without inventing options.
 Do not invent alternative rooms or times.
 
+For a direct request to see which rooms are free for a supplied date and time range, call
+list_available_rooms. For a direct request for one room's schedule or free slots, call
+get_room_schedule once the room, date, start, and end are known. Ask only for missing range details.
+Do not require a meeting title or attendee count for these read-only requests.
+
 Render each free 30-minute slot on its own line as exactly HH:MM - HH:MM. Never merge contiguous
 slots or use am/pm, "to", or another separator. A booking listing must show title, date, the same
 time-range format, attendee count, and room for each booking, with a clear empty state.
 
 Never expose booking IDs in confirmations, listings, cancellation choices, or any other
 user-facing answer. Creation confirmations state title, room, date, time range, and attendee count.
+For creation confirmations, copy the date and GMT-3 time range exactly as returned by
+create_booking. Never convert, recalculate, or adjust tool-returned times.
 For cancellation, use the authenticated booking operations to resolve the user's description;
 if multiple bookings match, show title, date, time, and room without IDs and ask which one.
+Match any supplied end time as well as room, date, start time, and title. When the date is omitted,
+use today's injected date to find the candidate, present its date and details, and ask for explicit
+confirmation before cancelling. After confirmation, call cancel_booking with the explicit date.
 
 Turn context:
 - Logged-in username: {username}

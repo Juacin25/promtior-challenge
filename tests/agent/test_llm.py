@@ -1,5 +1,7 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import Mock
+
+import pytest
 
 import app.agent.llm as llm_module
 
@@ -38,7 +40,9 @@ def test_build_llm_uses_default_model_when_environment_value_is_unset(monkeypatc
 
 
 def test_build_system_prompt_contains_grounded_gmt3_turn_context():
-    current_dt = datetime(2026, 7, 18, 1, 15, tzinfo=UTC)
+    current_dt = datetime(
+        2026, 7, 17, 22, 15, tzinfo=timezone(timedelta(hours=-3))
+    )
 
     prompt = llm_module.build_system_prompt(current_dt, "User1")
 
@@ -58,15 +62,16 @@ def test_build_system_prompt_contains_grounded_gmt3_turn_context():
     assert "bookings" in prompt
     assert "tool call" in prompt
     assert "never invent" in prompt.lower()
-    assert "absolute ISO datetimes" in prompt
+    assert "GMT-3 ISO datetimes" in prompt
+    assert "Never convert a datetime to another offset" in " ".join(prompt.split())
     assert prompt == llm_module.build_system_prompt(current_dt, "User1")
 
 
-def test_build_system_prompt_treats_naive_datetime_as_gmt3():
-    current_dt = datetime(2026, 7, 17, 9, 30)
-
-    prompt = llm_module.build_system_prompt(current_dt, "User2")
-
-    assert "2026-07-17 09:30:00-03:00" in prompt
-    assert "2026-07-18" in prompt
-    assert current_dt.tzinfo is None
+@pytest.mark.parametrize(
+    "current_dt",
+    [datetime(2026, 7, 17, 9, 30), datetime(2026, 7, 17, 12, 30, tzinfo=UTC)],
+    ids=["offsetless", "foreign_offset"],
+)
+def test_build_system_prompt_rejects_non_gmt3_datetime(current_dt):
+    with pytest.raises(ValueError, match="GMT-3"):
+        llm_module.build_system_prompt(current_dt, "User2")

@@ -49,15 +49,15 @@ app/
 | `domain/rules.py` | Validates 30-minute boundaries, positive duration up to three hours, capacity, non-empty title, and overlap. Rules take all inputs explicitly and raise typed domain errors. | Business rules remain pure and deterministic; they do no I/O and know nothing about SQLite, LangChain, or OpenAI. |
 | `domain/exceptions.py` | Defines `BookingError` and one direct subclass per rule. | Callers can handle all rule failures uniformly or catch one precise rule without an elaborate hierarchy. |
 | `data/db.py` | Opens SQLite, creates the `rooms`/`bookings` schema, idempotently seeds rooms A–E, and adds the attendee column to a legacy database when needed. | Schema lifecycle, compatibility migration, and fixed persistence seed data belong at the infrastructure boundary, outside the domain. |
-| `data/repository.py` | Maps booking rows—including attendee count—to/from domain objects and implements parameterized save/find/delete operations. It persists only; it performs no booking validation. | Application code depends on repository methods rather than SQL details, while rules remain reusable and store-independent. |
+| `data/repository.py` | Maps booking rows—including attendee count—to/from domain objects, enforces the single fixed-offset GMT-3 datetime representation without converting it, and implements parameterized save/find/delete operations. It persists only; it performs no booking validation. | Application code depends on repository methods rather than SQL details, while the persistence boundary prevents mixed datetime representations and rules remain store-independent. |
 | `auth/auth.py` | Authenticates the two fixed, case-sensitive challenge users using bcrypt hashes and returns a domain `User`. It does not use the bookings database. | The users are immutable challenge configuration, so a separate auth adapter avoids introducing mutable user persistence, roles, JWT, or session logic. |
-| `tools/booking_tools.py` | Builds `create_booking`, `cancel_booking`, `list_available_rooms`, and `get_room_schedule`. It parses/returns LLM-friendly strings and delegates state to `BookingRepository` and validation to `domain.rules`; cancel denial and absence share one ID-free response. | LangChain is an outer adapter. Closing over the repository keeps infrastructure out of the LLM-visible tool schemas and keeps business rules in the domain. The indistinguishable cancel response prevents ownership enumeration. |
-| `agent/llm.py` | Loads OpenAI configuration and builds the deterministic grounded system prompt, including the five-field collection, room-choice, cancellation, and output contracts. It does not bind tools or perform validation. | Conversational instructions belong with agent behavior. Its injected datetime makes prompt construction deterministic, while authoritative booking validation remains in the domain. |
+| `tools/booking_tools.py` | Builds `create_booking`, `cancel_booking`, `list_available_rooms`, and `get_room_schedule`. Successful writes return the persisted/deleted `Booking`; read and input-failure results remain strings. It accepts only fixed-offset GMT-3 ISO datetimes, delegates state to `BookingRepository` and validation to `domain.rules`, and keeps cancel denial and absence identical. | Returning the entity makes write confirmation evidence complete at its source. Closing over the repository keeps infrastructure out of the LLM-visible schemas and business rules in the domain. |
+| `agent/llm.py` | Loads OpenAI configuration and builds the deterministic grounded system prompt, including five-field collection, direct read-only tool routing, room choice, cancellation, and the exact GMT-3 confirmation contract. It does not bind tools or perform validation. | Conversational instructions belong with agent behavior. Its injected datetime makes prompt construction deterministic, while authoritative booking validation remains in the domain. |
 | `agent/guardrail.py` | Uses an injected LLM and a strict structured-output prompt to classify one incoming message as SAFE or UNSAFE, returning a frozen `GuardrailResult`. It has no DB access, tool calls, or booking logic. | Input security is an agent-layer concern. Injecting the already-configured LLM avoids hidden construction/configuration and makes the classifier deterministic under test. |
-| `agent/verifier.py` | Uses an injected LLM to compare a draft answer with this turn's serialized tool outputs, returning a frozen `VerifierResult` and an unsupported-claim reason when needed. It has no DB access, tool calls, or booking logic. | Output grounding is an agent-layer concern. Injecting the configured LLM and passing evidence explicitly keeps verification deterministic under test and separate from orchestration. |
+| `agent/verifier.py` | Uses an injected LLM to compare a draft with the user message, current/tomorrow date anchors, and serialized tool outputs. It returns a frozen `VerifierResult` and logs rejected reasoning/evidence server-side. User text grounds intent; state claims require tools, and draft dates/times must exactly match GMT-3 evidence. | Output grounding is an agent-layer concern. Explicit date anchors prevent the verifier from inventing a meaning for relative dates, while server logs make a generic user-safe rejection diagnosable. |
 | `agent/error_presentation.py` | Purely maps the Issue #4 `BookingError` types to fixed, actionable domain-language messages. It performs no I/O, LLM calls, or DB access and never echoes raw exception payloads. | Presentation belongs outside the domain vocabulary. The orchestrator calls it at its existing tool-error catch point, avoiding a second catch layer while keeping wording predictable and independently testable. |
-| `agent/conversation.py` | Purely performs conversational create pre-validation, formats free slots/bookings/confirmations without IDs, and resolves a cancellation description against already supplied owned bookings. It performs no SQL, auth, LLM calls, or repository access. | These deterministic UX and presentation policies belong outside both the domain guarantee and the model. Inputs and tool invokers are injected, making tool suppression, formatting, and ambiguity behavior fully testable. |
-| `agent/orchestrator.py` | Coordinates the guardrail, deterministic system prompt, server-bound tool adapters, model → tool → model loop, and verifier. It adds an authenticated `list_my_bookings` adapter and descriptive cancellation wrapper without changing the four underlying tool signatures. It owns no SQL, auth, booking rules, or conversation storage. | Per-message control flow and the bounded verifier-failure policy belong in the outer agent layer. The orchestrator depends on sibling agent services and tool/data adapters; those layers never depend back on it, so business behavior stays independently testable. |
+| `agent/conversation.py` | Purely performs conversational create pre-validation, renders create/cancel confirmations from the `Booking` returned by the write tool, labels GMT-3 evidence, partitions schedule slots into available/occupied sections, and resolves cancellation descriptions against supplied owned bookings. An omitted date uses the injected default date and requires confirmation. It performs no SQL, auth, LLM calls, or repository access. | Rendering returned entities removes the agent's parallel copy of write state. Inputs and tool invokers remain injected, making tool suppression, formatting, privacy, and ambiguity fully testable. |
+| `agent/orchestrator.py` | Coordinates the guardrail, deterministic system prompt, server-bound tool adapters, model → tool → model loop, and verifier. It adds an authenticated `list_my_bookings` adapter and descriptive cancellation wrapper, binding the injected current date as the safe default without changing the four underlying tool signatures. It owns no SQL, auth, booking rules, or conversation storage. | Per-message control flow and the bounded verifier-failure policy belong in the outer agent layer. The orchestrator depends on sibling agent services and tool/data adapters; those layers never depend back on it, so business behavior stays independently testable. |
 | `cache/semantic_cache.py` | Classifies only explicit static query categories, embeds eligible queries through an injected small/low-cost OpenAI embedder, and keeps answers in a process-local dictionary when cosine similarity exceeds a conservative threshold. It has no DB access or business logic. | The cache is an optional outer-layer optimization. Dependency injection prevents hidden API construction and makes similarity behavior deterministic in tests; ephemeral storage avoids coupling optimization data to booking persistence. |
 | `ui/session.py` | Owns the testable server-side auth flag/username updates, LangChain message history mutations, auth-gate predicate, orchestrator-call assembly, and full logout reset. It imports no Streamlit and contains no booking rules, SQL, or model construction. | Session behavior is separated from rendering so security and multi-turn context can be unit-tested without a Streamlit runtime. It delegates authentication and message handling inward to the existing services. |
 | `ui/streamlit_app.py` | Renders one login/chat page, gets credentials and chat input, displays messages, obtains the configured LLM through `build_llm`, and injects the current GMT-3 datetime into the session helper. | Streamlit is the outermost delivery detail. It depends inward on UI helpers, auth/agent services, and LangChain message types; no module depends back on it. Its render-only glue is the justified coverage omission. |
@@ -101,29 +101,43 @@ Inside the orchestrator, the flow is **guardrail → booking agent + tool loop �
    and end → non-blank title → attendee count, asking for any missing value and never supplying a
    default. The server-bound create adapter repeats the friendly boundary/duration/capacity/title
    checks before invoking the tool; this is a UX layer, while Issue #4 remains authoritative.
-   When only the room is missing, the agent calls `list_available_rooms`, presents every match,
-   and waits for the user's choice even if only one matches. `create_booking` and descriptive
+   Direct availability questions call `list_available_rooms`; direct room-schedule/free-slot
+   questions call `get_room_schedule` once their room/date/range is known and present every exact
+   30-minute slot under available or occupied without owner/title/ID details. These read-only paths
+   ask only for missing range details, not creation-only title or attendee fields. When only the
+   room is missing from a booking request, the agent calls `list_available_rooms`, presents every
+   match, and waits for the user's choice even if only one matches. `create_booking` and descriptive
    `cancel_booking` are wrapped so the logged-in username is inserted server-side and absent from
    every model-visible schema. A separate no-argument `list_my_bookings` adapter reads only that
    authenticated user's records. Cancellation filters those same owned records by the supplied
-   date/time, title, and/or room: one match invokes the existing ID-based tool internally, several
-   return ID-free choices, and none return a clear no-match response. The explicit loop
+   room, date, start/end time, and/or title. An omitted date is resolved against the injected
+   current date and the ID-free candidate is shown for confirmation; cancellation does not run on
+   that first turn. With an explicit date, one match invokes the existing ID-based tool internally,
+   several return ID-free choices, and none return a clear no-match response. The explicit loop
    sends system prompt → caller-owned history → current message to the model, executes each tool
    call, returns a `ToolMessage` to the model, and repeats until the model returns a natural-language
-   answer. Deterministic adapters format slot/list/confirmation evidence and remove IDs before it
+   answer. The loop has a fixed eight-step ceiling and returns the safe fallback if a model keeps
+   requesting tools. Deterministic create corrections—including the three-hour limit—terminate the
+   loop immediately instead of being sent back for another model attempt. Adapters preserve the
+   accepted GMT-3 wall time unchanged, format slot/list/confirmation evidence, preserve schedule
+   room/date context, and remove IDs before it
    reaches the model or verifier. At the existing tool-execution catch point, `BookingError` is passed to the pure
    deterministic presenter; raw exception text, identities, and internal IDs are never surfaced.
+   Creation evidence includes an explicit `GMT-3` label, and the model must copy its date/time
+   verbatim rather than convert, recalculate, or adjust it.
    The translated message becomes both the draft answer and turn evidence. It then follows the
    normal verifier step rather than bypassing output verification. Tool name/output evidence is
    retained internally for this turn.
 3. **Output verifier (implemented and wired last):** As the final per-message step,
-   `verify_response(draft_answer, tool_outputs, llm)` compares the drafted response with only the
-   tool evidence produced in that turn. Room, availability, capacity, time, and booking claims
-   must be supported. Greetings, conversational phrasing, and clarification questions are
-   grounded; with no tool output, only those non-factual responses are grounded. An ungrounded
-   draft is never emitted: the orchestrator performs one tool-free rewrite using the same evidence
-   and verifies it again. If that retry is still ungrounded, it returns a neutral safe fallback.
-   Tools are not re-executed during the retry, avoiding duplicate create/cancel side effects.
+   `verify_response(..., user_message=..., current_dt=...)` compares the draft with three explicit
+   evidence classes: user intent, deterministic current/tomorrow dates, and tool output. The user
+   message may ground only request details the
+   user supplied—desired room, date/time, title, and attendee count—so a no-tool clarification may
+   safely repeat them. Availability, capacity, room existence, and created/cancelled/persisted
+   state still require tool output. Successful write adapters render every confirmation field from
+   the returned `Booking`, so verification is possible by construction. An ungrounded draft is
+   never emitted: one rejection returns the neutral fallback promptly. Its reason and tool evidence
+   are logged server-side while the user sees only the generic message.
 
 This is the same end-to-end flow depicted by the component diagram; the diagram and this README
 describe one synchronized architecture, not separate target and implemented states.
@@ -136,30 +150,34 @@ This is what makes cancellation ownership enforceable—the model cannot ask the
 as the booking's actual owner. The LLM guardrail is a second layer for clear abuse, not the sole
 security boundary. An unsafe turn costs one guardrail LLM call and stops. A safe grounded turn
 costs one guardrail call, the booking agent's model round-trips (one initial generation plus one
-after each tool-call batch), and one verifier call. An ungrounded turn adds one tool-free rewrite
-call and one extra verifier call for the retry. Stable exact prefixes in the guardrail, booking,
-retry, and verifier prompts can receive eligible OpenAI prompt-cache savings, offsetting part—but
-not all—of that latency and token cost.
+   after each tool-call batch), and one verifier call. An ungrounded turn stops there; it adds no
+   rewrite or second verifier call. Stable exact prefixes in the guardrail, booking, and verifier
+   prompts can receive eligible OpenAI prompt-cache savings, offsetting part—but not all—of that
+   latency and token cost.
 
 Anti-hallucination is deliberately layered across the full flow:
 
 1. The Issue #8 system prompt requires every booking fact to be grounded in tool output.
 2. The constrained booking tools are the only permitted source of room, availability, capacity,
    time, and booking facts.
-3. The output verifier runs last against this turn's actual tool outputs and prevents every
-   ungrounded draft from reaching the user.
+3. The output verifier runs last against the current user message plus this turn's actual tool
+   outputs. User text proves intent and can support corrections for the fixed 30-minute,
+   positive-order, maximum-three-hour, and minimum-one-attendee collection constraints. Tool output
+   still proves room capacity, availability, existence, and booking state. Every draft unsupported
+   by the appropriate evidence is blocked.
 
 No single layer is a complete guarantee; robustness comes from their combination. In particular,
-the verifier is itself LLM-based, so the bounded retry and safe fallback reduce the chance and
-impact of hallucination without claiming perfect detection.
+the verifier is itself LLM-based, so the safe fallback prevents a rejected draft from escaping
+without claiming perfect detection.
 
 Issue #8, extended by Issue #18, provides `build_llm` and `build_system_prompt`. The prompt requires
 availability, capacity, booking, and schedule claims to come from tool calls; it restricts the
 assistant to rooms A–E and pins the required-field, user-owned room-choice, cancellation, and
 output-format behaviors. The prompt builder receives the logged-in username and current
-datetime from its caller, converts the time to fixed GMT-3 (`-03:00`), and supplies absolute
-today/tomorrow anchors in 24-hour format. It never reads the clock itself. The tools accept
-absolute ISO datetimes and treat a missing offset as GMT-3.
+datetime from its caller already expressed with the fixed GMT-3 (`-03:00`) offset and supplies
+today/tomorrow anchors in 24-hour format. It never reads or converts the clock itself. Tools accept
+only ISO datetimes carrying `-03:00`; offset-less or foreign-offset values are rejected rather than
+localized or translated. The accepted clock value is stored and displayed unchanged.
 
 The UI stores conversation history in Streamlit `session_state` as `HumanMessage` and
 `AIMessage` objects. For each submitted turn, the session helper snapshots the prior history,
@@ -210,10 +228,24 @@ Free times are always rendered as discrete 30-minute slots, one per line, using 
 
 Contiguous slots are never merged: a free 11:30–13:00 block is the three lines above, not one
 range. “to”, am/pm, en dashes, and alternative separators are not valid slot output.
+Schedules preserve the requested range and represent both states in separate sections. Each slot
+line retains the exact format above; occupied output contains no owner, title, or booking ID:
+
+```text
+Schedule for room C on 2026-07-21 (GMT-3):
+Available:
+09:00 - 09:30
+10:00 - 10:30
+Occupied:
+09:30 - 10:00
+```
+
+If a section has no slots, it contains `None.` Contiguous slots are never merged and a misaligned
+range is rejected rather than widened or truncated.
 
 Each “my bookings” entry shows the required four booking details—title, `HH:MM - HH:MM` time
 range, attendee count, and room—with its date on a separate line. The empty state is `You have no
-bookings.` Creation confirmations show title, room, date, time range, and attendee count.
+bookings.` Creation confirmations show title, room, date, `HH:MM - HH:MM GMT-3`, and attendee count.
 Cancellation choices show title, date, time, and room. Booking IDs are internal and never appear
 in any confirmation, listing, cancellation candidate, or cancellation success response.
 
@@ -273,8 +305,9 @@ production files, implement behavior, call a model, or scaffold booking tools.
 
 Issue #18 is the concrete use that validates this scope: the skill generated red-first skeletons
 for slot collection, room selection, strict output, authenticated booking listings,
-cancel-by-description, and the BookingError regression. Those skeletons were then wired to mocked
-LLM/agent objects and deterministic helpers before implementation; no test makes a live API call.
+cancel-by-description, the BookingError regression, and user-message evidence for no-tool
+clarifications. Those skeletons were then wired to mocked LLM/agent objects and deterministic
+helpers before implementation; no test makes a live API call.
 
 ## Decision Log
 
@@ -335,10 +368,9 @@ Entries are grouped chronologically by the issue that introduced the implemented
   is idempotent through `CREATE TABLE IF NOT EXISTS` and `INSERT OR IGNORE`.
 - **Room capacities are fixed and seeded on init:** A=2, B=2, C=4, D=8, E=10
   (single source: `ROOM_CAPACITIES` in `db.py`).
-- **Datetimes stored as ISO strings** (`isoformat()` / `fromisoformat()`),
-  preserving the supplied timezone offset in a simple, human-readable form. The
-  tool layer treats offset-less input as GMT-3 (`-03:00`); the repository itself
-  does not rewrite timezone offsets.
+- **Datetimes stored as fixed-offset GMT-3 ISO strings** (`isoformat()` / `fromisoformat()`) in a
+  simple, human-readable form. The tool and repository boundaries reject missing or foreign
+  offsets; neither converts them. This keeps one aware representation (`-03:00`) end to end.
 
 ### Issue #6 — Authentication
 
@@ -360,8 +392,8 @@ Entries are grouped chronologically by the issue that introduced the implemented
   translate results — no business logic inline. The repository is closed over by
   `build_booking_tools(repo)` rather than being a tool argument, so it never
   appears in the schema the LLM sees. The logged-in `user` is passed in by the
-  caller; tools do no auth. A missing datetime offset is read as GMT-3 (the app's
-  only timezone).
+  caller; tools do no auth. Datetimes must carry `-03:00`; a missing or different offset produces
+  an actionable input error instead of an implicit conversion.
 - **Two failure channels in the tools, by intent.** Rule violations
   (`BookingError` subclasses) **propagate** — the tools do *not* catch them, so
   the orchestrator can translate them centrally through Issue #14's deterministic presenter.
@@ -436,19 +468,23 @@ Entries are grouped chronologically by the issue that introduced the implemented
 
 - **The verifier is a second grounding check after draft generation.** The primary mechanism is
   the Issue #8 system prompt requiring room, availability, capacity, time, and booking facts to
-  come from tools. The verifier compares the draft only with this turn's tool outputs and reports
-  an unsupported claim; it does not replace prompt grounding or tool constraints.
+  come from tools. The verifier compares the draft with the current user message and this turn's
+  tool outputs, applying different authority to each: user text grounds requested values, while
+  tool output alone grounds room and booking state. It does not replace prompt grounding or tool
+  constraints.
 - **The configured LLM and evidence are injected into `verify_response`.** The verifier builds no
-  model and accesses neither the DB nor booking rules. Tool outputs are serialized with the draft
-  as evidence for one strict structured decision, producing a frozen `VerifierResult`.
-- **Non-factual no-tool turns are grounded.** Greetings, conversational phrasing, and requests
-  for clarification do not require tool evidence, preventing the verifier from over-flagging
-  normal dialogue. Specific room or booking facts still require tool support even when the turn
-  contains no tool output.
+  model and accesses neither the DB nor booking rules. The user message, injected current/tomorrow
+  anchors, and tool outputs are serialized with the draft for one strict decision, producing a frozen
+  `VerifierResult`.
+- **No-tool clarifications may repeat user-supplied request details.** Greetings and ordinary
+  clarification language remain grounded, and a clarification may echo the user's desired room,
+  date/time, title, or attendee count. This prevents valid slot-filling questions from falling
+  into the safe fallback. A user's assertion still cannot prove availability,
+  capacity, room existence, or booking state; those claims require tool evidence.
 - **Output verification costs one extra LLM call after each draft.** This adds latency and
   input-token cost on top of the guardrail and booking calls. Stable verifier prompts and the
   configured OpenAI prompt cache mitigate eligible repeated prefixes; Issue #11 invokes the
-  verifier last and owns the regeneration/fallback policy.
+  verifier last and owns the fallback policy.
 
 ### Issue #11, commit 1 — Guarded orchestrator and tool loop
 
@@ -473,11 +509,11 @@ Entries are grouped chronologically by the issue that introduced the implemented
   the turn. This keeps SQL in `data`, business rules in `domain`, and persistence out of the LLM
   schema while preserving bookings between messages.
 
-### Issue #11, commit 2 — Verifier policy and completed flow
+### Issue #11, commit 2 — Original verifier policy (superseded)
 
 - **An ungrounded draft gets one evidence-only retry, then a safe fallback.** The first draft is
-  checked against this turn's captured tool outputs. If rejected, a tool-free model call rewrites
-  it from the same evidence and the verifier checks that retry once. A second rejection returns
+  checked against the current user message and this turn's captured tool outputs. If rejected, a
+  tool-free model call rewrites it from the same evidence and the verifier checks that retry once. A second rejection returns
   `I couldn't produce a reliable answer. Please try again.` Neither ungrounded draft can be
   emitted. One bounded retry offers a chance to repair phrasing while preventing infinite loops;
   reusing evidence without rerunning tools also prevents duplicate booking or cancellation side
@@ -603,3 +639,97 @@ Entries are grouped chronologically by the issue that introduced the implemented
   only as a compatibility value for old rows whose count was never stored. New conversations
   never use that migration value as a default. No domain rule, repository method, or existing
   booking-tool signature changed.
+- **User messages are verifier evidence for intent, never for state.** Issue #18's required-field
+  flow often asks a clarification before any tool runs. Passing only empty tool evidence caused a
+  verifier to reject a valid question when it repeated the user's room, time, title, or attendee
+  count, eventually producing the safe fallback. The orchestrator now supplies the current user
+  message to verification. This fixes that false rejection without
+  allowing user text to establish availability, capacity, room existence, or booking status.
+- **All accepted timestamps use one aware GMT-3 representation.** The model must pass the user's
+  wall time with `-03:00`; missing and foreign offsets are rejected. No layer translates an
+  equivalent instant from another offset, so the accepted value is identical in the tool call,
+  SQLite row, and user-facing output.
+- **Standalone schedule and availability requests have explicit read-only routes.** They call
+  `get_room_schedule` and `list_available_rooms` respectively and do not collect creation-only
+  title/attendee fields. Formatted schedule evidence retains the queried room and local date so
+  the verifier can ground the model's answer; stripping that context previously caused valid
+  schedule responses to fall through to the safe fallback.
+- **Creation confirmation times are copied verbatim from GMT-3 tool evidence.** All users operate
+  in the application's fixed GMT-3 timezone, so the booking agent must not reinterpret the
+  deterministic confirmation in another zone. The evidence now labels `GMT-3`; the system prompt
+  forbids conversion and the verifier rejects any date/time mismatch. This layered prompt policy
+  fixes final-answer drift without moving booking
+  logic into the orchestrator.
+- **Fixed collection-rule corrections are valid verifier evidence without a tool call.** The agent
+  must catch 30-minute misalignment, end-before-start, ranges over three hours, and attendee counts
+  below one while collecting fields—even when another field such as the date is still missing.
+  Treating those server-defined constraints as verifier evidence prevents a correct correction
+  such as “a meeting cannot be more than 3 hours” from becoming the safe fallback. Room capacity,
+  availability, existence, and booking state remain tool-grounded; this exception does not widen
+  user text into evidence for mutable state.
+
+### Issue #20 — Time offset and core-function bugfixes
+
+- **GMT-3 is the single system-wide time standard, with no conversions.** The chosen convention is
+  offset-aware ISO datetimes fixed at `-03:00`: it makes the timezone explicit while preventing
+  naive/aware mixing. The creation defect occurred because its model/tool boundary admitted a UTC
+  representation and then stored and echoed that shifted wall clock, while cancellation simply
+  formatted stored fields. The fix removes every compensating `astimezone`/localization helper and
+  rejects missing or foreign offsets. A downstream add/subtract-hours display patch was rejected:
+  it would hide corrupt input while leaving storage inconsistent. The UI remains the sole clock
+  reader; all other layers receive time injected.
+- **Schedule retrieval lost occupied slots in agent presentation.** The raw tool already produced
+  both states, but the formatter selected only `free` lines. The formatter now partitions every
+  exact 30-minute slot into `Available` and `Occupied`, preserves the requested endpoints, rejects
+  misaligned ranges through the existing domain alignment rule, and never includes owner, title,
+  or ID data.
+- **Cancellation failed in description resolution before ownership was checked.** The bound
+  adapter omitted the described end time and had no omitted-date confirmation path. It now matches
+  room/date/start/end/title against only the server-bound user's bookings. A missing date uses the
+  injected current date and asks for confirmation; an explicit unique match alone reaches the
+  unchanged ID-based ownership tool. Ambiguous and absent matches remain non-mutating and ID-free,
+  and raw not-found/non-owner responses remain identical.
+- **Constraint failures remain one error path with precise presentation.** `DurationError` is now
+  translated separately for end-before-start and maximum duration, with the latter stating “at
+  most 3 hours.” Existing conversational pre-validation no longer shadows those cases with one
+  combined generic sentence: it mirrors the specific correction and includes the requested
+  duration. Alignment, capacity, missing-title, and overlap messages continue to state their valid
+  expected value without exposing raw exception details.
+- **Over-three-hour requests terminate instead of re-entering the agent loop.** The root cause was
+  the orchestrator's unbounded model → tool `while True`: conversational pre-validation returned a
+  correction as a tool result, allowing the model to repeat the same rejected call indefinitely.
+  A deterministic create correction now ends that loop immediately and proceeds once through the
+  verifier. The remaining loop is capped at eight model steps with the existing safe fallback as
+  its terminal behavior; output verification itself is a single decision.
+- **The simplification pass removes code that no longer earns its place.** Deleted timezone
+  conversion/localization helpers and their compensating tests, plus the dead free-only schedule
+  formatter superseded by the required free/occupied renderer. The repository SQL boundary,
+  server-bound tool wrappers, verifier, and conversational/domain validation pair remain: they
+  currently enforce persistence, identity security, grounding, and the deliberate UX-versus-
+  guarantee split rather than speculative flexibility.
+
+### Write-grounding verifier bugfix
+
+- **The observed failure was a missing date anchor, not missing create evidence.** With current
+  date `2026-07-20`, a live request for “tomorrow” created complete evidence for `2026-07-21`, but
+  the verifier rejected it verbatim because “The date '2026-07-21' does not match the
+  user-supplied request for 'tomorrow'.” The verifier received the full tool record and the exact
+  requested `17:00 - 18:00 GMT-3` range; it lacked only the deterministic meaning of “tomorrow.”
+  `current_date` and `tomorrow_date` are now supplied as explicit evidence, just as they are in the
+  booking prompt. The verifier was not weakened or bypassed for writes: genuinely unsupported
+  claims still return the generic fallback.
+- **Write tools return the affected `Booking`, making confirmations verifiable by construction.**
+  Successful create returns the persisted entity and successful cancel returns the deleted entity.
+  The agent presentation layer renders title, room, date, start/end, and attendees from that return
+  value; it no longer reconstructs successful write state from conversational arguments. Internal
+  IDs remain available inside the agent/tool boundary but never appear in user-facing output.
+  Cancellation description resolution and the server-bound ownership check are unchanged;
+  permission-denied and not-found responses remain indistinguishable.
+- **Verifier rejection details are server-only diagnostics.** Each rejected decision logs the
+  verifier's reason and serialized tool evidence. The user still receives only
+  `I couldn't produce a reliable answer. Please try again.`, so diagnostics improve without
+  exposing prompts, internal IDs, or security details.
+- **Deterministic rewrite/reverification was removed.** The former retry reused identical evidence;
+  in the reproduced failure it generated the same rejection twice while adding a rewrite call and
+  a second verifier call. The orchestrator now verifies once and promptly returns the safe fallback
+  on rejection. This deletes `_RETRY_PROMPT`, `_retry_draft`, and the second verification branch.
