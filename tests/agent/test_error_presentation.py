@@ -25,7 +25,9 @@ OWNER = "GreppableOwnerUsername"
 def presented_messages():
     return {
         SlotAlignmentError: present_booking_error(SlotAlignmentError(BOOKING_ID)),
-        DurationError: present_booking_error(DurationError(BOOKING_ID)),
+        DurationError: present_booking_error(
+            DurationError("A booking may last at most 3 hours.")
+        ),
         CapacityError: present_booking_error(
             CapacityError(
                 f"Attendees must be between 1 and the room capacity (4). {BOOKING_ID}"
@@ -53,10 +55,32 @@ def test_messages_explain_the_valid_expected_values(presented_messages):
     overlap = presented_messages[OverlapError]
 
     assert ":00" in slot and ":30" in slot
-    assert "end after it starts" in duration and "3 hours" in duration
+    assert "3 hours" in duration
     assert "at least 1" in capacity and "capacity of 4" in capacity
     assert "title" in title.lower() and "blank" in title.lower()
     assert "already booked" in overlap.lower() and "part or all" in overlap.lower()
+
+
+def test_constraint_messages_state_exact_expected_values(presented_messages):
+    assert presented_messages[SlotAlignmentError] == (
+        "Start and end times must use 30-minute boundaries (:00 or :30)."
+    )
+    assert presented_messages[DurationError] == "A booking can last at most 3 hours."
+    assert presented_messages[CapacityError] == (
+        "The attendee count must be at least 1 and within the room's capacity of 4."
+    )
+    assert presented_messages[TitleRequiredError] == (
+        "A meeting title is required and cannot be blank."
+    )
+    assert presented_messages[OverlapError] == (
+        "The room is already booked for part or all of that date and time range."
+    )
+
+
+def test_end_before_start_has_a_distinct_translated_message():
+    assert present_booking_error(DurationError("End time must be after start time.")) == (
+        "The end time must be after the start time."
+    )
 
 
 def test_overlap_message_leaks_neither_owner_nor_booking_id(presented_messages):

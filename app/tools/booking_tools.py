@@ -17,7 +17,7 @@ tool argument, so it never reaches the LLM's tool schema.
 """
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from langchain_core.tools import tool
 
@@ -27,7 +27,6 @@ from app.domain import rules
 from app.domain.exceptions import OverlapError
 from app.domain.models import Booking
 
-GMT3 = timezone(timedelta(hours=-3))
 SLOT = timedelta(minutes=30)
 _ROOM_LIST = ", ".join(sorted(ROOM_CAPACITIES))  # "A, B, C, D, E"
 _CANCEL_FAILURE = (
@@ -36,10 +35,18 @@ _CANCEL_FAILURE = (
 
 
 def _parse(value: str) -> datetime:
-    """Absolute ISO -> aware datetime. A missing offset means GMT-3, the app's
-    only timezone; aware datetimes are required to compare against stored ones."""
+    """Parse the app's sole datetime representation without converting it."""
     parsed = datetime.fromisoformat(value)
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=GMT3)
+    if parsed.utcoffset() != timedelta(hours=-3):
+        raise ValueError("Datetime must use the GMT-3 (-03:00) offset.")
+    return parsed
+
+
+def _datetime_error(start: str, end: str) -> str:
+    return (
+        f"'{start}' / '{end}' is not a valid GMT-3 ISO datetime. "
+        "Use YYYY-MM-DDTHH:MM-03:00."
+    )
 
 
 def _is_free(start: datetime, end: datetime, existing: list[Booking]) -> bool:
@@ -59,12 +66,12 @@ def build_booking_tools(repo: BookingRepository) -> list:
     @tool
     def create_booking(
         room_id: str, start: str, end: str, title: str, attendees: int, user: str
-    ) -> str:
+    ) -> Booking | str:
         """Book a room for a time range. Times are absolute ISO datetimes (GMT-3)."""
         try:
             start_dt, end_dt = _parse(start), _parse(end)
         except ValueError:
-            return f"'{start}' / '{end}' is not a valid ISO datetime. Use YYYY-MM-DDTHH:MM."
+            return _datetime_error(start, end)
 
         capacity = ROOM_CAPACITIES.get(room_id)
         if capacity is None:
@@ -88,19 +95,16 @@ def build_booking_tools(repo: BookingRepository) -> list:
         )
         rules.check_overlap(booking, repo.find_by_room(room_id))
         repo.save(booking)
-        return (
-            f"Booked room {room_id} for '{title}' from {start_dt:%Y-%m-%d %H:%M} "
-            f"to {end_dt:%H:%M} ({attendees} attendees). Booking id: {booking.id}."
-        )
+        return booking
 
     @tool
-    def cancel_booking(booking_id: str, user: str) -> str:
+    def cancel_booking(booking_id: str, user: str) -> Booking | str:
         """Cancel a booking the logged-in user made, by its booking id."""
         booking = repo.find_by_id(booking_id)
         if booking is None or booking.user != user:
             return _CANCEL_FAILURE
         repo.delete(booking_id)
-        return f"Cancelled booking '{booking_id}'."
+        return booking
 
     @tool
     def list_available_rooms(start: str, end: str, attendees: int | None = None) -> str:
@@ -111,7 +115,7 @@ def build_booking_tools(repo: BookingRepository) -> list:
         try:
             start_dt, end_dt = _parse(start), _parse(end)
         except ValueError:
-            return f"'{start}' / '{end}' is not a valid ISO datetime. Use YYYY-MM-DDTHH:MM."
+            return _datetime_error(start, end)
 
         free = [
             room
@@ -131,8 +135,9 @@ def build_booking_tools(repo: BookingRepository) -> list:
         try:
             start_dt, end_dt = _parse(start), _parse(end)
         except ValueError:
-            return f"'{start}' / '{end}' is not a valid ISO datetime. Use YYYY-MM-DDTHH:MM."
+            return _datetime_error(start, end)
 
+        rules.check_slot_alignment(start_dt, end_dt)
         existing = repo.find_by_room(room_id)
         lines = []
         slot_start = start_dt

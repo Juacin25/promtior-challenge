@@ -22,7 +22,8 @@ def _booking(id, title="Standup", room="C", hour=9):
 
 
 def test_unique_description_cancels_resolved_internal_id_without_exposing_it():
-    cancel_booking = Mock(return_value="Cancelled booking 'secret-id'.")
+    cancelled = _booking("secret-id")
+    cancel_booking = Mock(return_value=cancelled)
 
     result = execute_cancel_booking(
         cancel_booking,
@@ -34,6 +35,15 @@ def test_unique_description_cancels_resolved_internal_id_without_exposing_it():
 
     assert result == "Cancelled 'Standup' in room C on 2026-07-21, 09:00 - 10:00."
     assert "secret-id" not in result
+    returned_fields = (
+        cancelled.title,
+        cancelled.room_id,
+        cancelled.start.date().isoformat(),
+        cancelled.start.strftime("%H:%M"),
+        cancelled.end.strftime("%H:%M"),
+    )
+    for field in returned_fields:
+        assert field in result
     cancel_booking.assert_called_once_with(
         {"booking_id": "secret-id", "user": "User1"}
     )
@@ -98,8 +108,8 @@ def test_cancellation_requires_at_least_one_description_field():
     cancel_booking.assert_not_called()
 
 
-def test_unique_match_can_use_room_and_start_time():
-    cancel_booking = Mock(return_value="Cancelled booking 'id-one'.")
+def test_unique_undated_match_requires_confirmation_before_cancelling():
+    cancel_booking = Mock(name="cancel_booking")
 
     result = execute_cancel_booking(
         cancel_booking,
@@ -107,10 +117,14 @@ def test_unique_match_can_use_room_and_start_time():
         "User1",
         room_id="c",
         start="09:00",
+        default_date="2026-07-21",
     )
 
-    assert result.startswith("Cancelled 'Standup'")
-    cancel_booking.assert_called_once()
+    assert result == (
+        "I found this booking for today: Title: Standup | Room: C | "
+        "Date: 2026-07-21 | Time: 09:00 - 10:00. Should I cancel it?"
+    )
+    cancel_booking.assert_not_called()
 
 
 def test_tool_level_cancel_failure_is_preserved_without_internal_id():
@@ -119,7 +133,11 @@ def test_tool_level_cancel_failure_is_preserved_without_internal_id():
     )
 
     result = execute_cancel_booking(
-        cancel_booking, [_booking("hidden-id")], "User1", title="Standup"
+        cancel_booking,
+        [_booking("hidden-id")],
+        "User1",
+        title="Standup",
+        date="2026-07-21",
     )
 
     assert result == (
@@ -134,9 +152,10 @@ def test_tool_level_cancel_failure_is_preserved_without_internal_id():
         {"room_id": "D"},
         {"date": "2026-07-22"},
         {"start": "10:00"},
+        {"end": "10:30"},
         {"title": "Review"},
     ],
-    ids=["room", "date", "start", "title"],
+    ids=["room", "date", "start", "end", "title"],
 )
 def test_nonmatching_description_field_prevents_cancellation(description):
     cancel_booking = Mock(name="cancel_booking")

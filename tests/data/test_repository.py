@@ -1,4 +1,7 @@
-from datetime import datetime, timedelta, timezone
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta, timezone
+
+import pytest
 
 from app.data.db import connect
 from app.data.repository import BookingRepository
@@ -70,6 +73,46 @@ def test_datetime_round_trips(tmp_path):
     assert got.start == b.start
     assert got.end == b.end
     assert got.start.utcoffset() == timedelta(hours=-3)
+
+
+def test_save_preserves_exact_gmt3_wall_time(tmp_path):
+    connection = connect(tmp_path / "gmt3.db")
+    r = BookingRepository(connection)
+    booking = make_booking()
+
+    r.save(booking)
+
+    raw = connection.execute("SELECT start, end FROM bookings").fetchone()
+    stored = r.find_by_id("b1")
+    assert raw == ("2026-07-17T09:00:00-03:00", "2026-07-17T09:30:00-03:00")
+    assert stored.start.isoformat() == "2026-07-17T09:00:00-03:00"
+    assert stored.end.isoformat() == "2026-07-17T09:30:00-03:00"
+
+
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [
+        (datetime(2026, 7, 17, 9, 0), datetime(2026, 7, 17, 9, 30)),
+        (
+            datetime(2026, 7, 17, 12, 0, tzinfo=UTC),
+            datetime(2026, 7, 17, 12, 30, tzinfo=UTC),
+        ),
+    ],
+    ids=["offsetless", "foreign_offset"],
+)
+def test_save_rejects_non_gmt3_datetime_representation(tmp_path, start, end):
+    connection = connect(tmp_path / "invalid-timezone.db")
+    r = BookingRepository(connection)
+    booking = replace(
+        make_booking(),
+        start=start,
+        end=end,
+    )
+
+    with pytest.raises(ValueError, match="GMT-3"):
+        r.save(booking)
+
+    assert connection.execute("SELECT COUNT(*) FROM bookings").fetchone()[0] == 0
 
 
 def test_attendee_count_round_trips(tmp_path):

@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
 
 import pytest
@@ -62,7 +63,10 @@ def test_roomless_request_lists_matches_without_auto_selecting(tool_output, repl
     result, _ = _run_booking_agent(
         "Reserva para 5 personas de 14:30 a 16:00",
         [],
-        build_system_prompt(__import__("datetime").datetime(2026, 7, 20, 10), "User1"),
+        build_system_prompt(
+            datetime(2026, 7, 20, 10, tzinfo=timezone(timedelta(hours=-3))),
+            "User1",
+        ),
         llm,
         [create_booking, list_available_rooms],
     )
@@ -77,7 +81,7 @@ def test_roomless_request_lists_matches_without_auto_selecting(tool_output, repl
 
 def test_prompt_forbids_room_auto_selection_and_invented_alternatives():
     prompt = build_system_prompt(
-        __import__("datetime").datetime(2026, 7, 20, 10), "User1"
+        datetime(2026, 7, 20, 10, tzinfo=timezone(timedelta(hours=-3))), "User1"
     )
 
     assert "present every matching room" in prompt.lower()
