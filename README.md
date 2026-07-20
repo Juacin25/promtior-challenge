@@ -5,9 +5,9 @@
 Conversational chatbot for booking, listing, inspecting, and cancelling meeting rooms A–E at
 Promtior's Cubo Itaú office. The implemented foundation currently includes the pure booking
 domain, SQLite persistence, fixed-user authentication, four LangChain booking tools, and the
-OpenAI model/prompt configuration, input guardrail, output-verifier unit, and guarded booking
-agent/tool loop. The complete guardrail → booking → verifier flow is now wired; the user interface
-is not yet implemented.
+OpenAI model/prompt configuration, input guardrail, output-verifier unit, guarded booking
+agent/tool loop, and a static-fact-only semantic cache. The complete guardrail → booking →
+verifier flow is wired; the user interface is not yet implemented.
 
 ## Architecture
 
@@ -33,7 +33,8 @@ app/
 │   ├── guardrail.py    # Conservative SAFE/UNSAFE input classifier
 │   ├── verifier.py     # Draft-answer grounding check against tool output
 │   └── orchestrator.py # Guardrail + tool loop + verified-response policy
-├── cache/__init__.py   # Empty package marker; semantic cache not built
+├── cache/
+│   └── semantic_cache.py # Static-fact-only in-memory semantic cache
 └── ui/__init__.py      # Empty package marker; Streamlit UI not built
 ```
 
@@ -50,6 +51,7 @@ app/
 | `agent/guardrail.py` | Uses an injected LLM and a strict structured-output prompt to classify one incoming message as SAFE or UNSAFE, returning a frozen `GuardrailResult`. It has no DB access, tool calls, or booking logic. | Input security is an agent-layer concern. Injecting the already-configured LLM avoids hidden construction/configuration and makes the classifier deterministic under test. |
 | `agent/verifier.py` | Uses an injected LLM to compare a draft answer with this turn's serialized tool outputs, returning a frozen `VerifierResult` and an unsupported-claim reason when needed. It has no DB access, tool calls, or booking logic. | Output grounding is an agent-layer concern. Injecting the configured LLM and passing evidence explicitly keeps verification deterministic under test and separate from orchestration. |
 | `agent/orchestrator.py` | Coordinates the guardrail, deterministic system prompt, server-bound tools, model → tool → model loop, and verifier. It records this turn's tool outputs, retries an ungrounded draft once without re-executing tools, and otherwise returns a safe fallback. It owns no SQL, auth, booking rules, or conversation storage. | Per-message control flow and the bounded verifier-failure policy belong in the outer agent layer. The orchestrator depends on sibling agent services and tool/data adapters; those layers never depend back on it, so business behavior stays independently testable. |
+| `cache/semantic_cache.py` | Classifies only explicit static query categories, embeds eligible queries through an injected small/low-cost OpenAI embedder, and keeps answers in a process-local dictionary when cosine similarity exceeds a conservative threshold. It has no DB access or business logic. | The cache is an optional outer-layer optimization. Dependency injection prevents hidden API construction and makes similarity behavior deterministic in tests; ephemeral storage avoids coupling optimization data to booking persistence. |
 
 The domain depends only on the standard library. `data` and `auth` depend inward on domain
 types; `tools` depends on the domain and data abstractions plus LangChain. SQL is confined to
@@ -62,7 +64,7 @@ orchestrator.
 
 ## AI Workflow
 
-The complete per-message flow is **guardrail → booking agent + tool loop → output verifier**:
+The complete orchestrator flow is **guardrail → booking agent + tool loop → output verifier**:
 
 1. **Guardrail (implemented and wired first):** `handle_message` calls
    `check_message(message, llm)` before it builds the system prompt, opens the repository, binds
@@ -125,9 +127,17 @@ absolute ISO datetimes and treat a missing offset as GMT-3.
 
 The orchestrator receives LangChain message history from its caller and places it between the
 system prompt and current message; it neither owns nor mutates that history. Issue #13 will keep
-the history in Streamlit `session_state` and pass it in on each turn. The Streamlit chat flow and
-semantic cache are not yet implemented. Bookings persist through SQLite independently of this
-caller-owned conversation history.
+the history in Streamlit `session_state` and pass it in on each turn. The Streamlit chat flow is
+not yet implemented. Bookings persist through SQLite independently of this caller-owned
+conversation history.
+
+The implemented semantic cache defines a narrow pre-LLM optimization seam. When Issue #13
+composes the UI, its per-message caller will consult the cache before invoking `handle_message`,
+and only after `is_cacheable` explicitly recognizes a static question such as room capacity or
+the fixed room list. A hit can return the stored static answer without any LLM call; a miss
+continues into the orchestrator flow above. Availability, schedules, bookings, free/occupied
+slots, and every unrecognized query bypass the cache entirely, so the cache never sits in front
+of tool execution for state-dependent questions.
 
 OpenAI prompt caching is engaged with the stable model-level key
 `promtior-booking-agent-v1`, passed by `langchain-openai` as `prompt_cache_key`. OpenAI performs
@@ -136,8 +146,12 @@ tokens), and cache hits require an exact matching prefix. Accordingly, reusable 
 scope instructions appear first in the system prompt, while the changing datetime and username
 appear at the end. The orchestrator binds tool definitions in a stable
 create/cancel/list/schedule order, so eligible repeated system-prefix/tool-definition input can be
-reused; the username itself is closure state, not changing schema content. There is no local
-prompt-response cache and no claim that short, ineligible prompts produce a cache hit; usage is
+reused; the username itself is closure state, not changing schema content. Prompt caching lowers
+the input cost of an eligible LLM call but still makes that call. The separate semantic cache can
+avoid the call entirely, but only for repeated allowlisted static questions; it is not a general
+prompt-response cache. The static dataset is just five rooms with fixed capacities, so the real
+token savings here are modest. The mechanism demonstrates semantic caching and establishes a
+safe pattern rather than addressing a major project cost driver. Prompt-cache usage remains
 observable through the API response's cached-token metadata.
 
 ## Environment and configuration
@@ -152,9 +166,11 @@ committed.
 
 These are the only environment variables currently read by application code. The orchestrator
 passes the relative default `bookings.db` path directly to `data.db.connect`; it has no environment
-variable. Room capacities and the two challenge usernames/shared password are fixed in code.
-`.env.example` contains placeholders for both OpenAI variables, and `.gitignore` explicitly
-excludes `.env`.
+variable. `SemanticCache` reads no environment variables and constructs no client; the future
+composition layer supplies a small/low-cost OpenAI embedder configured with the existing API key,
+so this issue adds no configuration. Room capacities and the two challenge usernames/shared
+password are fixed in code. `.env.example` contains placeholders for both OpenAI variables, and
+`.gitignore` explicitly excludes `.env`.
 
 ## Decision Log
 
@@ -369,3 +385,25 @@ Entries are grouped chronologically by the issue that introduced the implemented
   tool-free rewrite plus one extra verifier call. Exact repeated prompt prefixes remain eligible
   for OpenAI prompt caching, which offsets part of the added latency and token usage but does not
   remove it.
+
+### Issue #12 — Static-only semantic cache
+
+- **Caching is explicit-allowlist only and defaults to bypass.** Only clearly static room facts,
+  currently capacities and the fixed A–E room list, are eligible. Availability, schedules, user
+  bookings, and free/occupied slots always bypass the cache, as does every query the classifier
+  does not recognize. Serving stale availability would produce an incorrect booking answer, so a
+  miss is safer than an ambitious classification or a wrong hit.
+- **Semantic matches must exceed a high similarity threshold.** The named `0.92` cosine threshold
+  is deliberately conservative: equivalent phrasings can reuse an answer, while borderline or
+  distant queries miss and continue to the normal LLM/tool flow. The embedding provider is
+  injected rather than constructed by the cache, keeping provider configuration outside the
+  module and tests deterministic without live API calls.
+- **Cache entries live only in process memory.** They are not written to SQLite because cached
+  responses are disposable optimization artifacts, not application data. Process restarts may
+  discard them without affecting booking correctness, and persistence would add coupling with no
+  benefit at this scale.
+- **The expected savings are intentionally modest.** There are only five rooms and a small set of
+  fixed facts. This feature demonstrates the technique and establishes a safe default-bypass
+  caching pattern; it is not presented as a major token-cost reduction for this project. It
+  complements prompt caching: prompt caching reduces repeated system-prompt/tool-definition input
+  cost, whereas a semantic-cache hit avoids the LLM call altogether.
