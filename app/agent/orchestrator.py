@@ -164,7 +164,7 @@ def _run_booking_agent(
             try:
                 output = str(tools_by_name[tool_name].invoke(tool_call["args"]))
             except BookingError as error:
-                message = present_booking_error(error)
+                message = present_booking_error(error, tool_call["args"])
                 tool_outputs.append({"tool": tool_name, "output": message})
                 return message, tool_outputs
 

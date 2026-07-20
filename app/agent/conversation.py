@@ -3,6 +3,7 @@
 import re
 from collections.abc import Callable
 from datetime import datetime, timedelta
+from typing import cast
 
 from app.data.db import ROOM_CAPACITIES
 from app.domain.models import Booking
@@ -20,6 +21,53 @@ def _parse_datetime(value: str) -> datetime | None:
         return None
 
 
+def _missing_booking_message(
+    room_id: str | None,
+    start: str | None,
+    end: str | None,
+    title: str | None,
+    attendees: int | None,
+) -> str | None:
+    missing = []
+    if not room_id or not room_id.strip():
+        missing.append("room (so I know which room to reserve)")
+    if all(
+        not value or re.fullmatch(r"\d{2}:\d{2}", value)
+        for value in (start, end)
+    ):
+        missing.append("date (so I know which day to reserve)")
+    if not start or not end:
+        missing.append("time range (start and end time)")
+    if title is None or not title.strip():
+        missing.append("meeting title (required and cannot be blank)")
+    if attendees is None:
+        missing.append("attendee count (needed to check the room fits)")
+    if not missing:
+        return None
+
+    understood = []
+    if room_id and room_id.strip():
+        understood.append(f"room {room_id.strip().upper()}")
+    parsed = next(
+        filter(None, (_parse_datetime(value) for value in (start, end) if value)),
+        None,
+    )
+    if parsed is not None:
+        understood.append(f"date {parsed:%Y-%m-%d}")
+    if start and end:
+        start_dt, end_dt = _parse_datetime(start), _parse_datetime(end)
+        start_time = start_dt.strftime("%H:%M") if start_dt else start
+        end_time = end_dt.strftime("%H:%M") if end_dt else end
+        understood.append(f"time range {start_time} - {end_time}")
+    if title and title.strip():
+        understood.append(f'meeting title "{title.strip()}"')
+    if attendees is not None:
+        understood.append(f"attendee count {attendees}")
+
+    prefix = f"I understood {', '.join(understood)}. " if understood else ""
+    return f"{prefix}To create the booking, please provide: {'; '.join(missing)}."
+
+
 def execute_create_booking(
     invoke: Callable[[dict], Booking | str],
     username: str,
@@ -31,21 +79,16 @@ def execute_create_booking(
     attendees: int | None = None,
 ) -> str:
     """Pre-validate a complete request, then invoke and present the domain tool."""
-    if not room_id or not room_id.strip():
-        return "Please provide a room."
-    if not start or not end:
-        return "Please provide both a start and end time."
+    missing_message = _missing_booking_message(
+        room_id, start, end, title, attendees
+    )
+    if missing_message:
+        return missing_message
+    room_id, start, end = cast(str, room_id), cast(str, start), cast(str, end)
+    title, attendees = cast(str, title), cast(int, attendees)
     start_dt, end_dt = _parse_datetime(start), _parse_datetime(end)
     if start_dt is None or end_dt is None:
-        if re.fullmatch(r"\d{2}:\d{2}", start) and re.fullmatch(
-            r"\d{2}:\d{2}", end
-        ):
-            return "Please provide the booking date."
         return "Please provide a valid date and time range."
-    if title is None or not title.strip():
-        return "Please provide a meeting title; it cannot be blank."
-    if attendees is None:
-        return "Please provide the attendee count."
     if start_dt.minute % 30 or end_dt.minute % 30:
         return "Please use start and end times on :00 or :30 boundaries."
     if end_dt <= start_dt:

@@ -144,4 +144,65 @@ def test_verifier_uses_a_strict_grounding_prompt():
     assert "today" in prompt
     assert "tomorrow" in prompt
     assert "never mention internal" in prompt
+    assert "missing fields" in prompt
+    assert "unsupported" in prompt
+    assert "single" in prompt and "future" in prompt
     assert result == verifier.VerifierResult(is_grounded=True, reason="")
+
+
+@pytest.mark.parametrize(
+    ("draft", "tool_outputs"),
+    [
+        (
+            "You requested 5 attendees, but room C has capacity 4; choose 1 to 4.",
+            [
+                {
+                    "tool": "create_booking",
+                    "output": "You requested 5 attendees, but room C has capacity 4; "
+                    "choose 1 to 4.",
+                }
+            ],
+        ),
+        (
+            "I understood room C and 5 attendees. Please provide the date and time range.",
+            [],
+        ),
+        (
+            "Recurring bookings aren't supported. I can help create one future booking.",
+            [],
+        ),
+    ],
+    ids=["rule_violation", "missing_parameters", "unsupported_request"],
+)
+def test_guidance_message_categories_are_sent_to_grounding_verifier(
+    draft, tool_outputs
+):
+    llm, checker = _llm_returning(True)
+
+    result = verifier.verify_response(
+        draft,
+        tool_outputs,
+        llm,
+        user_message="Book room C for 5 attendees every Monday.",
+        current_dt=CURRENT_DT,
+    )
+
+    assert result.is_grounded is True
+    payload = json.loads(checker.invoke.call_args.args[0][1][1])
+    assert payload["draft_answer"] == draft
+    assert payload["tool_outputs"] == tool_outputs
+
+
+def test_guidance_that_adds_an_unsupported_room_fact_is_rejected():
+    reason = "Room E's capacity was not present in the evidence."
+    llm, _ = _llm_returning(False, reason)
+
+    result = verifier.verify_response(
+        "Recurring bookings aren't supported, but room E holds 20 people.",
+        [],
+        llm,
+        user_message="Book a recurring meeting.",
+        current_dt=CURRENT_DT,
+    )
+
+    assert result == verifier.VerifierResult(is_grounded=False, reason=reason)

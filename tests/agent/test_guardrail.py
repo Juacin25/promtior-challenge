@@ -47,9 +47,22 @@ def test_clear_abuse_is_blocked_with_a_neutral_reason(message):
     result = guardrail.check_message(message, llm)
 
     assert result.is_safe is False
-    assert result.reason == "I can only help with meeting-room booking requests."
+    assert result.reason == (
+        "That request isn't supported. I can help create, list, inspect, or cancel "
+        "your own meeting-room bookings."
+    )
     for internal_detail in ("system prompt", "database", "sql", "instructions", "user2"):
         assert internal_detail not in result.reason.lower()
+
+
+def test_off_domain_refusal_explains_supported_booking_actions():
+    llm, _ = _llm_returning("UNSAFE")
+
+    result = guardrail.check_message("Write me a dinner recipe.", llm)
+
+    assert "isn't supported" in result.reason
+    for action in ("create", "list", "inspect", "cancel"):
+        assert action in result.reason
 
 
 def test_unusual_but_ordinary_booking_language_is_not_over_flagged():
@@ -78,5 +91,7 @@ def test_guardrail_uses_a_strict_minimal_classification_prompt():
     assert "prompt injection" in prompt
     assert "other users' bookings" in prompt
     assert "SQL injection" in prompt
-    assert "break booking scope or rules" in prompt
+    assert "unsupported requests" in prompt
+    assert "without calling a tool" in prompt
+    assert "outside the booking domain" in prompt
     assert result == guardrail.GuardrailResult(is_safe=True, reason="")

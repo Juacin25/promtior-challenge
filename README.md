@@ -52,12 +52,12 @@ app/
 | `data/repository.py` | Maps booking rows—including attendee count—to/from domain objects, enforces the single fixed-offset GMT-3 datetime representation without converting it, and implements parameterized save/find/delete operations. It persists only; it performs no booking validation. | Application code depends on repository methods rather than SQL details, while the persistence boundary prevents mixed datetime representations and rules remain store-independent. |
 | `auth/auth.py` | Authenticates the two fixed, case-sensitive challenge users using bcrypt hashes and returns a domain `User`. It does not use the bookings database. | The users are immutable challenge configuration, so a separate auth adapter avoids introducing mutable user persistence, roles, JWT, or session logic. |
 | `tools/booking_tools.py` | Builds `create_booking`, `cancel_booking`, `list_available_rooms`, and `get_room_schedule`. Successful writes return the persisted/deleted `Booking`; read and input-failure results remain strings. It accepts only fixed-offset GMT-3 ISO datetimes, delegates state to `BookingRepository` and validation to `domain.rules`, and keeps cancel denial and absence identical. | Returning the entity makes write confirmation evidence complete at its source. Closing over the repository keeps infrastructure out of the LLM-visible schemas and business rules in the domain. |
-| `agent/llm.py` | Loads OpenAI configuration and builds the deterministic grounded system prompt, including five-field collection, direct read-only tool routing, room choice, cancellation, and the exact GMT-3 confirmation contract. It does not bind tools or perform validation. | Conversational instructions belong with agent behavior. Its injected datetime makes prompt construction deterministic, while authoritative booking validation remains in the domain. |
-| `agent/guardrail.py` | Uses an injected LLM and a strict structured-output prompt to classify one incoming message as SAFE or UNSAFE, returning a frozen `GuardrailResult`. It has no DB access, tool calls, or booking logic. | Input security is an agent-layer concern. Injecting the already-configured LLM avoids hidden construction/configuration and makes the classifier deterministic under test. |
-| `agent/verifier.py` | Uses an injected LLM to compare a draft with the user message, current/tomorrow date anchors, and serialized tool outputs. It returns a frozen `VerifierResult` and logs rejected reasoning/evidence server-side. User text grounds intent; state claims require tools, and draft dates/times must exactly match GMT-3 evidence. | Output grounding is an agent-layer concern. Explicit date anchors prevent the verifier from inventing a meaning for relative dates, while server logs make a generic user-safe rejection diagnosable. |
-| `agent/error_presentation.py` | Purely maps the Issue #4 `BookingError` types to fixed, actionable domain-language messages. It performs no I/O, LLM calls, or DB access and never echoes raw exception payloads. | Presentation belongs outside the domain vocabulary. The orchestrator calls it at its existing tool-error catch point, avoiding a second catch layer while keeping wording predictable and independently testable. |
-| `agent/conversation.py` | Purely performs conversational create pre-validation, renders create/cancel confirmations from the `Booking` returned by the write tool, labels GMT-3 evidence, partitions schedule slots into available/occupied sections, and resolves cancellation descriptions against supplied owned bookings. An omitted date uses the injected default date and requires confirmation. It performs no SQL, auth, LLM calls, or repository access. | Rendering returned entities removes the agent's parallel copy of write state. Inputs and tool invokers remain injected, making tool suppression, formatting, privacy, and ambiguity fully testable. |
-| `agent/orchestrator.py` | Coordinates the guardrail, deterministic system prompt, server-bound tool adapters, model → tool → model loop, and verifier. It adds an authenticated `list_my_bookings` adapter and descriptive cancellation wrapper, binding the injected current date as the safe default without changing the four underlying tool signatures. It owns no SQL, auth, booking rules, or conversation storage. | Per-message control flow and the bounded verifier-failure policy belong in the outer agent layer. The orchestrator depends on sibling agent services and tool/data adapters; those layers never depend back on it, so business behavior stays independently testable. |
+| `agent/llm.py` | Loads OpenAI configuration and builds the deterministic grounded system prompt, including explanatory five-field collection, unsupported-action guidance, direct read-only tool routing, room choice, cancellation, and the exact GMT-3 confirmation contract. It does not bind tools or perform validation. | Conversational instructions belong with agent behavior. Its injected datetime makes prompt construction deterministic, while authoritative booking validation remains in the domain. |
+| `agent/guardrail.py` | Uses an injected LLM and a strict structured-output prompt to classify one incoming message as SAFE or UNSAFE, returning a frozen `GuardrailResult`. Unsafe requests receive fixed guidance about the supported booking actions. It has no DB access, tool calls, or booking logic. | Input security is an agent-layer concern. Injecting the already-configured LLM avoids hidden construction/configuration and makes the classifier deterministic under test; clearer refusal text does not weaken the short-circuit. |
+| `agent/verifier.py` | Uses an injected LLM to compare a draft with the user message, current/tomorrow date anchors, fixed conversational/action boundaries, and serialized tool outputs. It returns a frozen `VerifierResult` and logs rejected reasoning/evidence server-side. User text grounds intent and clarification; state claims require tools, and draft dates/times must exactly match GMT-3 evidence. | Output grounding is an agent-layer concern. Explicit date and action anchors prevent valid guidance from being rejected while continuing to block invented room or booking facts. |
+| `agent/error_presentation.py` | Purely maps the Issue #4 `BookingError` types plus the attempted safe booking fields to fixed, actionable domain-language messages. It performs no I/O, LLM calls, or DB access and never echoes raw exception payloads. | Rule-error presentation belongs outside the domain vocabulary. The orchestrator calls it at its existing tool-error catch point, avoiding a second catch layer while keeping wording predictable and independently testable. |
+| `agent/conversation.py` | Purely performs conversational create pre-validation, aggregates missing fields while acknowledging supplied details, renders create/cancel confirmations from the `Booking` returned by the write tool, labels GMT-3 evidence, partitions schedule slots into available/occupied sections, and resolves cancellation descriptions against supplied owned bookings. An omitted date uses the injected default date and requires confirmation. It performs no SQL, auth, LLM calls, or repository access. | Rendering and clarification belong in deterministic presentation helpers. Inputs and tool invokers remain injected, making tool suppression, formatting, privacy, and ambiguity fully testable. |
+| `agent/orchestrator.py` | Coordinates the guardrail, deterministic system prompt, server-bound tool adapters, model → tool → model loop, and verifier. It adds authenticated list/cancel adapters, passes attempted tool arguments to deterministic error presentation, and binds the injected current date without changing the four underlying tool signatures. It owns no SQL, auth, booking rules, or conversation storage. | Per-message control flow and the bounded verifier-failure policy belong in the outer agent layer. The orchestrator depends on sibling agent services and tool/data adapters; those layers never depend back on it, so business behavior stays independently testable. |
 | `cache/semantic_cache.py` | Classifies only explicit static query categories, embeds eligible queries through an injected small/low-cost OpenAI embedder, and keeps answers in a process-local dictionary when cosine similarity exceeds a conservative threshold. It has no DB access or business logic. | The cache is an optional outer-layer optimization. Dependency injection prevents hidden API construction and makes similarity behavior deterministic in tests; ephemeral storage avoids coupling optimization data to booking persistence. |
 | `ui/session.py` | Owns the testable server-side auth flag/username updates, LangChain message history mutations, auth-gate predicate, orchestrator-call assembly, and full logout reset. It imports no Streamlit and contains no booking rules, SQL, or model construction. | Session behavior is separated from rendering so security and multi-turn context can be unit-tested without a Streamlit runtime. It delegates authentication and message handling inward to the existing services. |
 | `ui/streamlit_app.py` | Renders one login/chat page, gets credentials and chat input, displays messages, obtains the configured LLM through `build_llm`, and injects the current GMT-3 datetime into the session helper. | Streamlit is the outermost delivery detail. It depends inward on UI helpers, auth/agent services, and LangChain message types; no module depends back on it. Its render-only glue is the justified coverage omission. |
@@ -91,15 +91,21 @@ Inside the orchestrator, the flow is **guardrail → booking agent + tool loop �
 1. **Guardrail (implemented and wired first):** `handle_message` calls
    `check_message(message, llm)` before it builds the system prompt, opens the repository, binds
    the booking agent, or invokes any tool. It marks clear prompt injection, improper data
-   extraction, SQL-injection-looking input, and rule/scope-breaking requests UNSAFE. Ordinary
-   booking language—including unusual or ambiguous phrasing—defaults to SAFE to minimize false
-   positives. An unsafe result immediately returns one neutral refusal and exposes no classifier,
-   prompt, database, or other-user details.
+   extraction, SQL-injection-looking input, and off-domain requests UNSAFE. Ordinary booking
+   language—including unusual, ambiguous, or understood-but-unsupported booking actions—defaults
+   to SAFE so the booking agent can explain the exact limitation. An unsafe result immediately
+   returns plain guidance that the assistant can create, list, inspect, or cancel only the
+   authenticated user's meeting-room bookings; it exposes no classifier, prompt, database, or
+   other-user details.
 2. **Booking agent (implemented and wired):** For a safe message, the orchestrator builds the
    Issue #8 prompt from the caller-supplied GMT-3 datetime and username, then binds the Issue #7
    tools in their stable order. Before creation, the booking agent collects room → date → start
-   and end → non-blank title → attendee count, asking for any missing value and never supplying a
-   default. The server-bound create adapter repeats the friendly boundary/duration/capacity/title
+   and end → non-blank title → attendee count, asking for every missing value together, briefly
+   explaining why it is needed, acknowledging already-understood values, and never supplying a
+   default. Multi-room, recurring/repeating, past, modification, and other-user requests do not
+   call tools or partially execute: the agent states that the action is unsupported and explains
+   the supported single-future-booking and authenticated-user read/cancel operations. The
+   server-bound create adapter repeats the friendly boundary/duration/capacity/title
    checks before invoking the tool; this is a UX layer, while Issue #4 remains authoritative.
    Direct availability questions call `list_available_rooms`; direct room-schedule/free-slot
    questions call `get_room_schedule` once their room/date/range is known and present every exact
@@ -121,8 +127,10 @@ Inside the orchestrator, the flow is **guardrail → booking agent + tool loop �
    loop immediately instead of being sent back for another model attempt. Adapters preserve the
    accepted GMT-3 wall time unchanged, format slot/list/confirmation evidence, preserve schedule
    room/date context, and remove IDs before it
-   reaches the model or verifier. At the existing tool-execution catch point, `BookingError` is passed to the pure
-   deterministic presenter; raw exception text, identities, and internal IDs are never surfaced.
+   reaches the model or verifier. At the existing tool-execution catch point, `BookingError` and
+   the attempted safe booking fields are passed to the pure deterministic presenter. It names the
+   violated rule and expected value, reflects the user's requested value, and gives a direct
+   correction; raw exception text, identities, and internal IDs are never surfaced.
    Creation evidence includes an explicit `GMT-3` label, and the model must copy its date/time
    verbatim rather than convert, recalculate, or adjust it.
    The translated message becomes both the draft answer and turn evidence. It then follows the
@@ -133,8 +141,10 @@ Inside the orchestrator, the flow is **guardrail → booking agent + tool loop �
    evidence classes: user intent, deterministic current/tomorrow dates, and tool output. The user
    message may ground only request details the
    user supplied—desired room, date/time, title, and attendee count—so a no-tool clarification may
-   safely repeat them. Availability, capacity, room existence, and created/cancelled/persisted
-   state still require tool output. Successful write adapters render every confirmation field from
+   safely repeat them, identify missing fields, and explain fixed supported-action boundaries.
+   Rule-error wording is grounded by the captured tool result. Availability, capacity, room
+   existence, and created/cancelled/persisted state still require tool output. Successful write
+   adapters render every confirmation field from
    the returned `Booking`, so verification is possible by construction. An ungrounded draft is
    never emitted: one rejection returns the neutral fallback promptly. Its reason and tool evidence
    are logged server-side while the user sees only the generic message.
@@ -214,6 +224,32 @@ prompt-response cache. The static dataset is just five rooms with fixed capaciti
 token savings here are modest. The mechanism demonstrates semantic caching and establishes a
 safe pattern rather than addressing a major project cost driver. Prompt-cache usage remains
 observable through the API response's cached-token metadata.
+
+## User-facing messages
+
+Requests that cannot run use three deliberately separate message categories:
+
+1. **Rule violations** come from a typed domain error and are translated deterministically at the
+   orchestrator's existing catch point. The message reflects the attempted safe fields, names the
+   violated rule and valid value, and gives the next correction. Example: `The requested 3 hours
+   30 minutes exceeds the 3-hour maximum. Choose a shorter time range.`
+2. **Missing parameters** are handled by the conversation adapter and booking prompt before a
+   write. All missing domain fields are requested together, while supplied values are acknowledged.
+   Example: `I understood date 2026-07-21, time range 14:30 - 16:00, attendee count 5. To create
+   the booking, please provide: room (so I know which room to reserve); meeting title (required and
+   cannot be blank).`
+3. **Unsupported or impossible requests** are explained by the booking agent without any partial
+   tool execution; clear abuse, improper access, and off-domain requests still short-circuit at the
+   guardrail with the same plain supported-action guidance. Example: `Recurring bookings aren't
+   supported. I can help create a single future booking.`
+
+Messages use domain language only: no booking IDs, exception names, stack traces, database terms,
+or conflicting-owner identity. Permission denial and a missing cancellation target remain
+indistinguishable. Booking-agent guidance proceeds through the normal verifier. User-supplied
+values and fixed action/rule boundaries can ground corrective guidance, while room capacity,
+availability, existence, and booking state still require matching tool output. The fixed guardrail
+refusal remains the intentional pre-agent/pre-verifier security short-circuit and asserts no room
+or booking-state fact.
 
 ## Output formats
 
@@ -733,3 +769,25 @@ Entries are grouped chronologically by the issue that introduced the implemented
   in the reproduced failure it generated the same rejection twice while adding a rewrite call and
   a second verifier call. The orchestrator now verifies once and promptly returns the safe fallback
   on rejection. This deletes `_RETRY_PROMPT`, `_retry_draft`, and the second verification branch.
+
+### Issue #22 — User-facing errors and guidance
+
+- **Non-executable requests use three categories in three existing layers.** Typed rule violations
+  stay in the deterministic Issue #14 presenter; incomplete-but-valid requests stay in the
+  conversation adapter and booking prompt; understood unsupported actions stay in booking-agent
+  guidance, while clear abuse, improper access, and off-domain requests retain the guardrail
+  short-circuit. They were deliberately not unified because they have different evidence and
+  control flow: a raised domain rule, absent inputs before a tool call, or an action for which no
+  tool exists. One generic mechanism would either lose that context or duplicate existing paths.
+- **Correction messages reflect the request and state the valid value.** A user can now compare
+  what they supplied with the 30-minute boundary, three-hour maximum, actual tool-grounded room
+  capacity, non-blank-title requirement, or occupied-range rule and see the next action directly.
+  Missing-field replies ask for all absent fields together, explain non-obvious needs such as
+  attendee count for fit checking, and acknowledge values already understood. This minimizes
+  corrective turns without inventing defaults or alternatives.
+- **Guidance is grounded output, not an exception to grounding.** Rule translations are captured
+  as tool evidence; user text can support echoed request values and missing-field clarification;
+  fixed supported-action boundaries can support an unsupported-action explanation. Mutable room
+  and booking facts still require tool output, so adding an unsupported capacity, availability,
+  or booking claim remains a verifier rejection. The fixed guardrail refusal continues to return
+  before the booking agent and verifier by design and contains no mutable-state assertion.
