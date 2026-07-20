@@ -6,8 +6,8 @@ Conversational chatbot for booking, listing, inspecting, and cancelling meeting 
 Promtior's Cubo Itaú office. The implemented foundation currently includes the pure booking
 domain, SQLite persistence, fixed-user authentication, four LangChain booking tools, and the
 OpenAI model/prompt configuration, input guardrail, output-verifier unit, and guarded booking
-agent/tool loop. The verifier is not yet wired into that loop, and the user interface is not yet
-implemented.
+agent/tool loop. The complete guardrail → booking → verifier flow is now wired; the user interface
+is not yet implemented.
 
 ## Architecture
 
@@ -32,7 +32,7 @@ app/
 │   ├── llm.py          # ChatOpenAI factory and grounded prompt builder
 │   ├── guardrail.py    # Conservative SAFE/UNSAFE input classifier
 │   ├── verifier.py     # Draft-answer grounding check against tool output
-│   └── orchestrator.py # Guardrail + server-bound booking-tool loop
+│   └── orchestrator.py # Guardrail + tool loop + verified-response policy
 ├── cache/__init__.py   # Empty package marker; semantic cache not built
 └── ui/__init__.py      # Empty package marker; Streamlit UI not built
 ```
@@ -49,7 +49,7 @@ app/
 | `agent/llm.py` | Loads OpenAI configuration and builds the deterministic grounded system prompt. It contains no booking rules and does not bind tools. | Model-provider configuration is isolated from both business behavior and the future orchestration loop. Its injected datetime makes prompt construction testable and deterministic. |
 | `agent/guardrail.py` | Uses an injected LLM and a strict structured-output prompt to classify one incoming message as SAFE or UNSAFE, returning a frozen `GuardrailResult`. It has no DB access, tool calls, or booking logic. | Input security is an agent-layer concern. Injecting the already-configured LLM avoids hidden construction/configuration and makes the classifier deterministic under test. |
 | `agent/verifier.py` | Uses an injected LLM to compare a draft answer with this turn's serialized tool outputs, returning a frozen `VerifierResult` and an unsupported-claim reason when needed. It has no DB access, tool calls, or booking logic. | Output grounding is an agent-layer concern. Injecting the configured LLM and passing evidence explicitly keeps verification deterministic under test and separate from orchestration. |
-| `agent/orchestrator.py` | Coordinates the guardrail, deterministic system prompt, server-bound tools, and model → tool → model loop. It opens the existing repository adapter for the turn, records that turn's tool outputs for the verifier insertion point, catches `BookingError`, and then closes the connection. It owns no SQL, auth, booking rules, or conversation storage. | Per-message control flow belongs in the outer agent layer. The orchestrator depends on the sibling agent services and the tool/data adapters; those layers never depend back on it, so business behavior stays independently testable. |
+| `agent/orchestrator.py` | Coordinates the guardrail, deterministic system prompt, server-bound tools, model → tool → model loop, and verifier. It records this turn's tool outputs, retries an ungrounded draft once without re-executing tools, and otherwise returns a safe fallback. It owns no SQL, auth, booking rules, or conversation storage. | Per-message control flow and the bounded verifier-failure policy belong in the outer agent layer. The orchestrator depends on sibling agent services and tool/data adapters; those layers never depend back on it, so business behavior stays independently testable. |
 
 The domain depends only on the standard library. `data` and `auth` depend inward on domain
 types; `tools` depends on the domain and data abstractions plus LangChain. SQL is confined to
@@ -62,8 +62,7 @@ orchestrator.
 
 ## AI Workflow
 
-The target per-message design is **guardrail → booking agent → output verifier**. Issue #11 commit
-1 implements the first two stages as follows:
+The complete per-message flow is **guardrail → booking agent + tool loop → output verifier**:
 
 1. **Guardrail (implemented and wired first):** `handle_message` calls
    `check_message(message, llm)` before it builds the system prompt, opens the repository, binds
@@ -80,14 +79,17 @@ The target per-message design is **guardrail → booking agent → output verifi
    call, returns a `ToolMessage` to the model, and repeats until the model returns a natural-language
    answer. `BookingError` is translated centrally into a clear message. Tool name/output evidence
    is retained internally for this turn.
-3. **Output verifier (implemented, wiring lands in commit 2):** As the final per-message step,
+3. **Output verifier (implemented and wired last):** As the final per-message step,
    `verify_response(draft_answer, tool_outputs, llm)` compares the drafted response with only the
    tool evidence produced in that turn. Room, availability, capacity, time, and booking claims
    must be supported. Greetings, conversational phrasing, and clarification questions are
    grounded; with no tool output, only those non-factual responses are grounded. An ungrounded
-   result names the unsupported claim without exposing internal prompt or system details. Commit
-   2 will insert this check between the booking loop's internal `(draft, tool_outputs)` result and
-   the public answer, completing guardrail → booking → verifier.
+   draft is never emitted: the orchestrator performs one tool-free rewrite using the same evidence
+   and verifies it again. If that retry is still ungrounded, it returns a neutral safe fallback.
+   Tools are not re-executed during the retry, avoiding duplicate create/cancel side effects.
+
+This is the same end-to-end flow depicted by the component diagram; the diagram and this README
+describe one synchronized architecture, not separate target and implemented states.
 
 The primary defense is architectural: the booking agent can call only constrained tools,
 which use parameterized repository queries, fixed rooms, and an ownership check on cancellation;
@@ -95,22 +97,24 @@ it has no arbitrary-SQL surface. In addition, the model cannot set or override t
 the username is injected by a server-side closure and `user` is absent from the exposed schemas.
 This is what makes cancellation ownership enforceable—the model cannot ask the cancel tool to act
 as the booking's actual owner. The LLM guardrail is a second layer for clear abuse, not the sole
-security boundary. It adds one LLM call per safe message and is the only LLM call for an unsafe
-message. Reusing the stable classifier prefix with the configured OpenAI prompt cache can mitigate
-eligible calls.
+security boundary. An unsafe turn costs one guardrail LLM call and stops. A safe grounded turn
+costs one guardrail call, the booking agent's model round-trips (one initial generation plus one
+after each tool-call batch), and one verifier call. An ungrounded turn adds one tool-free rewrite
+call and one extra verifier call for the retry. Stable exact prefixes in the guardrail, booking,
+retry, and verifier prompts can receive eligible OpenAI prompt-cache savings, offsetting part—but
+not all—of that latency and token cost.
 
 Anti-hallucination is deliberately layered across the full flow:
 
 1. The Issue #8 system prompt requires every booking fact to be grounded in tool output.
 2. The constrained booking tools are the only permitted source of room, availability, capacity,
    time, and booking facts.
-3. The output verifier is designed to run last against this turn's actual tool outputs; Issue #11
-   commit 2 will connect that already-implemented unit to the evidence now collected by the loop.
+3. The output verifier runs last against this turn's actual tool outputs and prevents every
+   ungrounded draft from reaching the user.
 
 No single layer is a complete guarantee; robustness comes from their combination. In particular,
-the verifier is itself LLM-based, so it reduces but cannot eliminate hallucination. Once wired
-after draft generation, it adds another LLM call and therefore more latency/input-token cost; its
-stable prompt can also benefit from eligible prompt caching.
+the verifier is itself LLM-based, so the bounded retry and safe fallback reduce the chance and
+impact of hallucination without claiming perfect detection.
 
 Issue #8, now implemented, provides `build_llm` and `build_system_prompt`. The prompt requires
 availability, capacity, booking, and schedule claims to come from tool calls; it also restricts
@@ -323,10 +327,10 @@ Entries are grouped chronologically by the issue that introduced the implemented
   for clarification do not require tool evidence, preventing the verifier from over-flagging
   normal dialogue. Specific room or booking facts still require tool support even when the turn
   contains no tool output.
-- **Output verification costs one extra LLM call after each draft once wired.** This adds latency
-  and input-token cost on top of the guardrail and booking calls. Stable verifier prompts and the
-  configured OpenAI prompt cache mitigate eligible repeated prefixes; Issue #11 remains
-  responsible for invoking the verifier last and deciding whether to regenerate or fall back.
+- **Output verification costs one extra LLM call after each draft.** This adds latency and
+  input-token cost on top of the guardrail and booking calls. Stable verifier prompts and the
+  configured OpenAI prompt cache mitigate eligible repeated prefixes; Issue #11 invokes the
+  verifier last and owns the regeneration/fallback policy.
 
 ### Issue #11, commit 1 — Guarded orchestrator and tool loop
 
@@ -343,10 +347,25 @@ Entries are grouped chronologically by the issue that introduced the implemented
 - **A small explicit LangChain message loop coordinates tool calls.** The installed LangChain API
   exposes model tool binding directly, so no second agent abstraction is needed: model tool calls
   are executed, returned as `ToolMessage` evidence, and repeated until a final answer. Each turn
-  also returns its tool name/output records internally, giving commit 2 a direct verifier
-  insertion point. Domain `BookingError` failures are caught here and surfaced clearly; Issue #14
-  can refine that wording without changing the tools.
+  also returns its tool name/output records internally for the verifier. Domain `BookingError`
+  failures are caught here and surfaced clearly; Issue #14 can refine that wording without
+  changing the tools.
 - **The orchestrator uses a turn-scoped connection to `bookings.db`.** It composes the existing
   repository and tool factory only after the guardrail passes, then closes the connection after
   the turn. This keeps SQL in `data`, business rules in `domain`, and persistence out of the LLM
   schema while preserving bookings between messages.
+
+### Issue #11, commit 2 — Verifier policy and completed flow
+
+- **An ungrounded draft gets one evidence-only retry, then a safe fallback.** The first draft is
+  checked against this turn's captured tool outputs. If rejected, a tool-free model call rewrites
+  it from the same evidence and the verifier checks that retry once. A second rejection returns
+  `I couldn't produce a reliable answer. Please try again.` Neither ungrounded draft can be
+  emitted. One bounded retry offers a chance to repair phrasing while preventing infinite loops;
+  reusing evidence without rerunning tools also prevents duplicate booking or cancellation side
+  effects.
+- **Verification deliberately trades cost for defense in depth.** A safe grounded turn uses one
+  guardrail call, the required booking-agent round-trips, and one verifier call. A retry adds one
+  tool-free rewrite plus one extra verifier call. Exact repeated prompt prefixes remain eligible
+  for OpenAI prompt caching, which offsets part of the added latency and token usage but does not
+  remove it.

@@ -1,3 +1,4 @@
+import json
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
@@ -6,6 +7,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 import app.agent.orchestrator as orchestrator
+from app.agent.verifier import VerifierResult
 from app.data.db import connect
 from app.data.repository import BookingRepository
 from app.domain.models import Booking
@@ -46,7 +48,16 @@ def database_path(tmp_path, monkeypatch):
     return path
 
 
-def test_safe_message_runs_tool_loop_and_returns_final_answer(database_path):
+@pytest.fixture(autouse=True)
+def verifier_mock(monkeypatch):
+    verifier = Mock(return_value=VerifierResult(is_grounded=True, reason=""))
+    monkeypatch.setattr(orchestrator, "verify_response", verifier)
+    return verifier
+
+
+def test_safe_message_runs_tool_loop_and_returns_grounded_answer(
+    database_path, verifier_mock
+):
     tool_result = "Booked room C"
     llm, booking_agent = _llm_returning(
         _tool_call("create_booking", CREATE_ARGS),
@@ -67,9 +78,18 @@ def test_safe_message_runs_tool_loop_and_returns_final_answer(database_path):
     assert isinstance(returned_tool_message, ToolMessage)
     assert returned_tool_message.name == "create_booking"
     assert returned_tool_message.content.startswith("Booked room C")
+    verified_draft, verified_outputs, verified_llm = verifier_mock.call_args.args
+    assert verified_draft == tool_result
+    assert verified_outputs[0]["tool"] == "create_booking"
+    assert verified_outputs[0]["output"].startswith("Booked room C")
+    assert verified_llm is llm
+    verifier_mock.assert_called_once()
+    llm.invoke.assert_not_called()
 
 
-def test_unsafe_message_returns_refusal_without_booking_agent_or_tools(monkeypatch):
+def test_unsafe_message_returns_refusal_without_agent_tools_or_verifier(
+    monkeypatch, verifier_mock
+):
     llm, booking_agent = _llm_returning(classification="UNSAFE")
     connect_mock = Mock()
     tools_mock = Mock()
@@ -88,6 +108,7 @@ def test_unsafe_message_returns_refusal_without_booking_agent_or_tools(monkeypat
     connect_mock.assert_not_called()
     tools_mock.assert_not_called()
     prompt_mock.assert_not_called()
+    verifier_mock.assert_not_called()
 
 
 def test_model_cannot_supply_or_spoof_the_server_bound_username(database_path):
@@ -155,7 +176,9 @@ def test_booking_error_is_returned_as_a_clear_message(database_path):
     booking_agent.invoke.assert_called_once()
 
 
-def test_history_is_passed_between_system_prompt_and_current_message(database_path):
+def test_no_tool_clarification_is_grounded_without_being_over_flagged(
+    database_path, verifier_mock
+):
     history = [
         HumanMessage(content="I need a room tomorrow."),
         AIMessage(content="What time do you need it?"),
@@ -176,6 +199,54 @@ def test_history_is_passed_between_system_prompt_and_current_message(database_pa
         HumanMessage(content="I need a room tomorrow."),
         AIMessage(content="What time do you need it?"),
     ]
+    verifier_mock.assert_called_once_with("How many attendees?", [], llm)
+
+
+def test_ungrounded_draft_is_retried_once_and_grounded_retry_is_returned(
+    database_path, verifier_mock
+):
+    first_draft = "Room E is free too."
+    retried_draft = "Room C was booked for Standup."
+    llm, booking_agent = _llm_returning(
+        _tool_call("create_booking", CREATE_ARGS),
+        AIMessage(content=first_draft),
+    )
+    llm.invoke.return_value = AIMessage(content=retried_draft)
+    verifier_mock.side_effect = [
+        VerifierResult(is_grounded=False, reason="Room E was not in the tool output."),
+        VerifierResult(is_grounded=True, reason=""),
+    ]
+
+    result = orchestrator.handle_message("Book it.", [], "User1", CURRENT_DT, llm)
+
+    assert result == retried_draft
+    assert verifier_mock.call_count == 2
+    assert verifier_mock.call_args_list[1].args[1] == verifier_mock.call_args_list[0].args[1]
+    llm.invoke.assert_called_once()
+    assert booking_agent.invoke.call_count == 2
+    retry_payload = json.loads(llm.invoke.call_args.args[0][1][1])
+    assert retry_payload["tool_outputs"] == verifier_mock.call_args_list[0].args[1]
+    with closing(connect(database_path)) as connection:
+        assert len(BookingRepository(connection).find_by_room("C")) == 1
+
+
+def test_two_ungrounded_drafts_return_safe_fallback(database_path, verifier_mock):
+    first_draft = "Room Z is definitely free."
+    retried_draft = "Room Y is definitely free."
+    llm, _ = _llm_returning(AIMessage(content=first_draft))
+    llm.invoke.return_value = AIMessage(content=retried_draft)
+    verifier_mock.side_effect = [
+        VerifierResult(is_grounded=False, reason="Room Z does not exist."),
+        VerifierResult(is_grounded=False, reason="Room Y does not exist."),
+    ]
+
+    result = orchestrator.handle_message("What is free?", [], "User1", CURRENT_DT, llm)
+
+    assert result == "I couldn't produce a reliable answer. Please try again."
+    assert first_draft not in result
+    assert retried_draft not in result
+    llm.invoke.assert_called_once()
+    assert verifier_mock.call_count == 2
 
 
 def test_agent_loop_collects_this_turns_tool_outputs(database_path):
