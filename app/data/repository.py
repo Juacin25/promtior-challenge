@@ -16,12 +16,13 @@ def _to_booking(row: sqlite3.Row) -> Booking:
         room_id=row[1],
         user=row[2],
         title=row[3],
-        start=datetime.fromisoformat(row[4]),
-        end=datetime.fromisoformat(row[5]),
+        attendees=row[4],
+        start=datetime.fromisoformat(row[5]),
+        end=datetime.fromisoformat(row[6]),
     )
 
 
-_COLUMNS = "id, room_id, user, title, start, end"
+_COLUMNS = "id, room_id, user, title, attendees, start, end"
 
 
 class BookingRepository:
@@ -30,12 +31,13 @@ class BookingRepository:
 
     def save(self, booking: Booking) -> None:
         self._conn.execute(
-            f"INSERT INTO bookings ({_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?)",
+            f"INSERT INTO bookings ({_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 booking.id,
                 booking.room_id,
                 booking.user,
                 booking.title,
+                booking.attendees,
                 booking.start.isoformat(),
                 booking.end.isoformat(),
             ),

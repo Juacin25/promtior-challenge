@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS bookings (
     room_id TEXT NOT NULL,
     user TEXT NOT NULL,
     title TEXT NOT NULL,
+    attendees INTEGER NOT NULL,
     start TEXT NOT NULL,
     end TEXT NOT NULL
 );
@@ -30,6 +31,11 @@ def connect(path: str | Path) -> sqlite3.Connection:
     """Open a connection and ensure schema + seeded rooms exist (idempotent)."""
     conn = sqlite3.connect(path)
     conn.executescript(_SCHEMA)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(bookings)")}
+    if "attendees" not in columns:
+        conn.execute(
+            "ALTER TABLE bookings ADD COLUMN attendees INTEGER NOT NULL DEFAULT 1"
+        )
     conn.executemany(
         "INSERT OR IGNORE INTO rooms (id, capacity) VALUES (?, ?)",
         ROOM_CAPACITIES.items(),

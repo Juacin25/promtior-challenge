@@ -142,6 +142,7 @@ def test_model_cannot_spoof_username_to_cancel_another_users_booking(database_pa
         room_id="C",
         user="User2",
         title="Private meeting",
+        attendees=2,
         start=datetime(2026, 7, 21, 9, 0, tzinfo=GMT3),
         end=datetime(2026, 7, 21, 10, 0, tzinfo=GMT3),
     )

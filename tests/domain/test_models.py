@@ -25,6 +25,7 @@ def test_booking_construction_references_room_by_id():
         room_id="A",
         user="User1",
         title="Standup",
+        attendees=3,
         start=start,
         end=end,
     )
@@ -32,6 +33,7 @@ def test_booking_construction_references_room_by_id():
     assert booking.room_id == "A"
     assert booking.user == "User1"
     assert booking.title == "Standup"
+    assert booking.attendees == 3
     assert booking.start == start
     assert booking.end == end
 
@@ -40,8 +42,8 @@ def test_value_equality():
     assert Room(id="B", capacity=4) == Room(id="B", capacity=4)
     assert User(username="User2") == User(username="User2")
     start, end = datetime(2026, 7, 17, 9, 0), datetime(2026, 7, 17, 9, 30)
-    assert Booking("b1", "A", "User1", "T", start, end) == Booking(
-        "b1", "A", "User1", "T", start, end
+    assert Booking("b1", "A", "User1", "T", 3, start, end) == Booking(
+        "b1", "A", "User1", "T", 3, start, end
     )
     assert Room(id="A", capacity=1) != Room(id="A", capacity=2)
 
@@ -51,7 +53,15 @@ def test_value_equality():
     [
         Room(id="A", capacity=10),
         User(username="User1"),
-        Booking("b1", "A", "User1", "T", datetime(2026, 7, 17, 9, 0), datetime(2026, 7, 17, 9, 30)),
+        Booking(
+            "b1",
+            "A",
+            "User1",
+            "T",
+            3,
+            datetime(2026, 7, 17, 9, 0),
+            datetime(2026, 7, 17, 9, 30),
+        ),
     ],
 )
 def test_immutable(entity):

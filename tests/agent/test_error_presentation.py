@@ -114,6 +114,7 @@ def test_cancel_denial_and_missing_booking_are_indistinguishable_and_private(tmp
                 room_id="C",
                 user=OWNER,
                 title="Private meeting",
+                attendees=2,
                 start=datetime(2026, 7, 21, 9, tzinfo=timezone(timedelta(hours=-3))),
                 end=datetime(2026, 7, 21, 10, tzinfo=timezone(timedelta(hours=-3))),
             )

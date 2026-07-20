@@ -27,5 +27,6 @@ class Booking:
     room_id: str
     user: str
     title: str
+    attendees: int
     start: datetime
     end: datetime

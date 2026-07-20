@@ -24,7 +24,15 @@ def dt(h, m):
 
 
 def booking(start, end, room_id="A", id="c"):
-    return Booking(id=id, room_id=room_id, user="User1", title="T", start=start, end=end)
+    return Booking(
+        id=id,
+        room_id=room_id,
+        user="User1",
+        title="T",
+        attendees=1,
+        start=start,
+        end=end,
+    )
 
 
 # --- slot alignment ---
@@ -137,7 +145,7 @@ def test_overlap_contained_raises():
 
 
 def test_overlap_message_does_not_leak_user():
-    existing = [Booking("x", "A", "SecretUser", "T", dt(9, 0), dt(10, 0))]
+    existing = [Booking("x", "A", "SecretUser", "T", 1, dt(9, 0), dt(10, 0))]
     with pytest.raises(OverlapError) as exc:
         check_overlap(booking(dt(9, 0), dt(10, 0)), existing)
     assert "SecretUser" not in str(exc.value)

@@ -7,10 +7,18 @@ from app.domain.models import Booking
 GMT3 = timezone(timedelta(hours=-3))
 
 
-def make_booking(id="b1", room_id="A", user="User1", title="Standup"):
+def make_booking(id="b1", room_id="A", user="User1", title="Standup", attendees=3):
     start = datetime(2026, 7, 17, 9, 0, tzinfo=GMT3)
     end = datetime(2026, 7, 17, 9, 30, tzinfo=GMT3)
-    return Booking(id=id, room_id=room_id, user=user, title=title, start=start, end=end)
+    return Booking(
+        id=id,
+        room_id=room_id,
+        user=user,
+        title=title,
+        attendees=attendees,
+        start=start,
+        end=end,
+    )
 
 
 def repo(tmp_path, name="test.db"):
@@ -62,6 +70,13 @@ def test_datetime_round_trips(tmp_path):
     assert got.start == b.start
     assert got.end == b.end
     assert got.start.utcoffset() == timedelta(hours=-3)
+
+
+def test_attendee_count_round_trips(tmp_path):
+    r = repo(tmp_path)
+    r.save(make_booking(attendees=7))
+
+    assert r.find_by_id("b1").attendees == 7
 
 
 def test_persistence_across_fresh_connection(tmp_path):
