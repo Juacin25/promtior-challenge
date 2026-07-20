@@ -6,8 +6,9 @@ Conversational chatbot for booking, listing, inspecting, and cancelling meeting 
 Promtior's Cubo Itaú office. The implemented foundation currently includes the pure booking
 domain, SQLite persistence, fixed-user authentication, four LangChain booking tools, and the
 OpenAI model/prompt configuration, input guardrail, output-verifier unit, guarded booking
-agent/tool loop, and a static-fact-only semantic cache. The complete guardrail → booking →
-verifier flow is wired; the user interface is not yet implemented.
+agent/tool loop, a static-fact-only semantic cache, and a single-page Streamlit login/chat UI
+with session-scoped conversation memory. The complete UI → guardrail → booking → verifier flow
+is wired.
 
 ## Architecture
 
@@ -35,7 +36,9 @@ app/
 │   └── orchestrator.py # Guardrail + tool loop + verified-response policy
 ├── cache/
 │   └── semantic_cache.py # Static-fact-only in-memory semantic cache
-└── ui/__init__.py      # Empty package marker; Streamlit UI not built
+└── ui/
+    ├── session.py      # Tested auth gate, history, turn, and logout helpers
+    └── streamlit_app.py # Thin single-page login and chat rendering
 ```
 
 | Module | Responsibility and boundary | Why it lives there |
@@ -52,6 +55,8 @@ app/
 | `agent/verifier.py` | Uses an injected LLM to compare a draft answer with this turn's serialized tool outputs, returning a frozen `VerifierResult` and an unsupported-claim reason when needed. It has no DB access, tool calls, or booking logic. | Output grounding is an agent-layer concern. Injecting the configured LLM and passing evidence explicitly keeps verification deterministic under test and separate from orchestration. |
 | `agent/orchestrator.py` | Coordinates the guardrail, deterministic system prompt, server-bound tools, model → tool → model loop, and verifier. It records this turn's tool outputs, retries an ungrounded draft once without re-executing tools, and otherwise returns a safe fallback. It owns no SQL, auth, booking rules, or conversation storage. | Per-message control flow and the bounded verifier-failure policy belong in the outer agent layer. The orchestrator depends on sibling agent services and tool/data adapters; those layers never depend back on it, so business behavior stays independently testable. |
 | `cache/semantic_cache.py` | Classifies only explicit static query categories, embeds eligible queries through an injected small/low-cost OpenAI embedder, and keeps answers in a process-local dictionary when cosine similarity exceeds a conservative threshold. It has no DB access or business logic. | The cache is an optional outer-layer optimization. Dependency injection prevents hidden API construction and makes similarity behavior deterministic in tests; ephemeral storage avoids coupling optimization data to booking persistence. |
+| `ui/session.py` | Owns the testable server-side auth flag/username updates, LangChain message history mutations, auth-gate predicate, orchestrator-call assembly, and full logout reset. It imports no Streamlit and contains no booking rules, SQL, or model construction. | Session behavior is separated from rendering so security and multi-turn context can be unit-tested without a Streamlit runtime. It delegates authentication and message handling inward to the existing services. |
+| `ui/streamlit_app.py` | Renders one login/chat page, gets credentials and chat input, displays messages, obtains the configured LLM through `build_llm`, and injects the current GMT-3 datetime into the session helper. | Streamlit is the outermost delivery detail. It depends inward on UI helpers, auth/agent services, and LangChain message types; no module depends back on it. Its render-only glue is the justified coverage omission. |
 
 The domain depends only on the standard library. `data` and `auth` depend inward on domain
 types; `tools` depends on the domain and data abstractions plus LangChain. SQL is confined to
@@ -60,11 +65,17 @@ queries. Therefore, the implemented SQL boundary is the data layer—not `reposi
 All queries with external values are parameterized.
 The orchestrator is the outer coordinator: dependencies flow from it toward the agent helpers,
 tool adapter, repository, and domain exception contract, never from those layers back toward the
-orchestrator.
+orchestrator. The UI sits outside that coordinator and depends inward; nothing in the domain,
+data, tools, cache, or agent layers imports the UI.
 
 ## AI Workflow
 
-The complete orchestrator flow is **guardrail → booking agent + tool loop → output verifier**:
+The complete user-turn flow is **Streamlit UI → guardrail → booking agent + tool loop → output
+verifier → Streamlit UI**. The UI first applies a single-page server-side authentication gate:
+unauthenticated sessions see only the login form, while authenticated sessions see the chat. No
+URL route or query parameter selects the protected view.
+
+Inside the orchestrator, the flow is **guardrail → booking agent + tool loop → output verifier**:
 
 1. **Guardrail (implemented and wired first):** `handle_message` calls
    `check_message(message, llm)` before it builds the system prompt, opens the repository, binds
@@ -125,19 +136,25 @@ datetime from its caller, converts the time to fixed GMT-3 (`-03:00`), and suppl
 today/tomorrow anchors in 24-hour format. It never reads the clock itself. The tools accept
 absolute ISO datetimes and treat a missing offset as GMT-3.
 
-The orchestrator receives LangChain message history from its caller and places it between the
-system prompt and current message; it neither owns nor mutates that history. Issue #13 will keep
-the history in Streamlit `session_state` and pass it in on each turn. The Streamlit chat flow is
-not yet implemented. Bookings persist through SQLite independently of this caller-owned
-conversation history.
+The UI stores conversation history in Streamlit `session_state` as `HumanMessage` and
+`AIMessage` objects. For each submitted turn, the session helper snapshots the prior history,
+appends the new human message, and calls the orchestrator with the message, prior history,
+server-side authenticated username, configured LLM, and `datetime.now()` computed in fixed GMT-3.
+The orchestrator therefore receives multi-turn context without owning or mutating its storage and
+without reading the clock. The returned reply is appended as an `AIMessage` and rendered. Logout
+clears all session state and conversation history, while bookings remain durable in SQLite.
 
-The implemented semantic cache defines a narrow pre-LLM optimization seam. When Issue #13
-composes the UI, its per-message caller will consult the cache before invoking `handle_message`,
-and only after `is_cacheable` explicitly recognizes a static question such as room capacity or
-the fixed room list. A hit can return the stored static answer without any LLM call; a miss
-continues into the orchestrator flow above. Availability, schedules, bookings, free/occupied
-slots, and every unrecognized query bypass the cache entirely, so the cache never sits in front
-of tool execution for state-dependent questions.
+History is intentionally unbounded within this small challenge session. Very long sessions will
+increase prompt tokens and latency. A production deployment should cap context to the last N
+messages or summarize older turns; trimming/summarization is outside this scope.
+
+The implemented semantic cache defines a narrow pre-LLM optimization seam for a future
+composition step. Only an explicitly recognized static question such as room capacity or the
+fixed room list may consult it before `handle_message`; a hit can avoid the LLM call, while a miss
+continues into the flow above. Availability, schedules, bookings, free/occupied slots, and every
+unrecognized query must bypass the cache entirely, so it can never sit in front of tool execution
+for state-dependent questions. This UI issue does not construct the required embedding client or
+wire that optional optimization into the turn path.
 
 OpenAI prompt caching is engaged with the stable model-level key
 `promtior-booking-agent-v1`, passed by `langchain-openai` as `prompt_cache_key`. OpenAI performs
@@ -171,6 +188,12 @@ composition layer supplies a small/low-cost OpenAI embedder configured with the 
 so this issue adds no configuration. Room capacities and the two challenge usernames/shared
 password are fixed in code. `.env.example` contains placeholders for both OpenAI variables, and
 `.gitignore` explicitly excludes `.env`.
+
+Run the single-page application from the repository root:
+
+```bash
+streamlit run app/ui/streamlit_app.py
+```
 
 ## Decision Log
 
@@ -407,3 +430,29 @@ Entries are grouped chronologically by the issue that introduced the implemented
   caching pattern; it is not presented as a major token-cost reduction for this project. It
   complements prompt caching: prompt caching reduces repeated system-prompt/tool-definition input
   cost, whereas a semantic-cache hit avoids the LLM call altogether.
+
+### Issue #13 — Thin Streamlit UI and session memory
+
+- **Authentication gates one page through server-side `st.session_state`, not JWT or routing.**
+  The app chooses login versus chat solely from the session's `authenticated` flag. Streamlit is
+  a stateful single-page app here: there is no post-login URL, protected route, or query parameter
+  a user can navigate to directly, and browser input cannot choose the server-side flag. JWT and
+  session-cookie machinery would not close an additional route-bypass vector in this design.
+  This is proportionate for the challenge, not a production-grade session system:
+  `session_state` is ephemeral, a server restart or page reload returns the user to login (failing
+  safe), and there is no configurable expiry or remote invalidation.
+- **Conversation state and booking state have deliberately different lifetimes.** LangChain
+  `HumanMessage`/`AIMessage` history lives only in `session_state` and is cleared completely on
+  logout. Bookings remain in SQLite and therefore survive logout. This matches the requirement
+  for multi-turn conversation without confusing chat memory with durable business data.
+- **The UI owns the clock boundary.** `streamlit_app.py` computes `datetime.now()` with the fixed
+  GMT-3 timezone and injects that value into the orchestrator call. Agent prompt and orchestration
+  modules continue to receive time as data, keeping their tests deterministic.
+- **Rendering stays separate from session behavior.** `streamlit_app.py` contains only login,
+  chat, and logout widgets plus dependency wiring and is the justified coverage omission.
+  `ui/session.py` contains the fully covered auth-state, history-ordering, trusted-username,
+  prior-context, and reset behavior without importing Streamlit. The UI is the outermost detail:
+  it depends inward and nothing depends on it.
+- **History is unbounded only for this scoped implementation.** Token usage and latency grow with
+  long conversations. Production should retain the last N messages or summarize older context;
+  neither policy is added here because the challenge does not define a context budget.
