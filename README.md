@@ -200,6 +200,36 @@ Run the single-page application from the repository root:
 streamlit run app/ui/streamlit_app.py
 ```
 
+## Development tooling
+
+Project-scoped Claude Code automation lives in `.claude/settings.json`; its command hooks call the
+offline, repository-relative `.claude/hooks/checks.py` runner:
+
+- **After `Edit` or `Write`:** Python files under `app/` or `tests/` trigger
+  `python -m ruff check .`. Other paths and non-Python files return immediately, keeping the edit
+  loop fast. A failure starts with `LINT CHECK FAILED`, shows the command, and includes the Ruff
+  code, file/line excerpt, and suggested correction.
+- **Before Claude Code runs `git commit`:** the hook runs `python -m pytest --cov`. The options in
+  `pyproject.toml` automatically enable branch coverage and the 100% gate. Failing tests are
+  labelled `TEST CHECK FAILED`; a suite that passes but misses the threshold is labelled
+  `COVERAGE CHECK FAILED`. Both outputs include a shortened pytest excerpt with the relevant
+  failure and summary. Tests remain deterministic and mocked, so neither hook needs network or
+  OpenAI access.
+
+`git commit --no-verify ...` deliberately bypasses the pre-commit runner. This escape hatch is
+for an explicit, reviewed exception only; bypassing is discouraged because it removes the local
+test/coverage evidence. These are Claude Code project hooks, so a commit executed outside Claude
+Code also does not trigger them; CI and review remain necessary backstops.
+
+The repository-local `.claude/skills/add-agent-behavior` skill scaffolds the repeated workflow for
+an agent-layer behavior change. It accepts a behavior name/description, determines (or asks for)
+the integration point—system prompt, orchestrator, or deterministic presentation—and can accept a
+concrete user message, expected reply, and tools that must not fire. Its bundled generator creates
+one named, Ruff-clean test skeleton per scenario under `tests/agent/`, with mocked LLM/agent
+objects, exact observable output, and `assert_not_called` checks. The skeleton intentionally fails
+until its TODO invocation is wired through the existing agent API. The skill does **not** create
+production files, implement behavior, call a model, or scaffold booking tools.
+
 ## Decision Log
 
 Entries are grouped chronologically by the issue that introduced the implemented decision.
@@ -482,3 +512,21 @@ Entries are grouped chronologically by the issue that introduced the implemented
   caught domain error becomes a normal draft answer and captured tool evidence, then proceeds to
   the verifier like any other response. This adds neither a second exception boundary nor a path
   around the guardrail → booking → verifier workflow.
+
+### Issue #15 — Claude Code hooks and agent-behavior skill
+
+- **Hooks make the CLAUDE.md gates automatic inside Claude Code rather than
+  discipline-dependent.** Edit/write events lint Python changes immediately; attempted commits
+  run the configured tests and coverage gate. Failures name lint, tests, or coverage and include
+  actionable excerpts. The hooks reduce avoidable omissions but cannot tell whether a passing
+  test is weak or asserts the wrong behavior, so human review and CI remain required.
+- **One skill covers the agent-behavior workflow repeated since Issue #8.** Prompt instructions,
+  orchestration policies, and deterministic presentation rules all follow the same TDD shape:
+  choose the agent integration point, scaffold one mocked deterministic failing test per
+  scenario, then stop before implementation. A booking-tool scaffolding skill was considered and
+  rejected as dead weight because all required tools were completed in Issue #7 and none remain
+  to add.
+- **The skill scaffolds tests, not solutions.** Inputs identify the behavior, integration point,
+  observable reply, and any tool that must remain uncalled. Output is an intentionally failing
+  test skeleton with no live API path. Keeping production logic out of the generator preserves
+  the red-first TDD boundary and prevents boilerplate from guessing behavior requirements.
