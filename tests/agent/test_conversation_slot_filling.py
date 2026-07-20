@@ -16,27 +16,15 @@ VALID_REQUEST = {
 
 
 @pytest.mark.parametrize(
-    ("overrides", "expected"),
+    ("overrides", "missing_field"),
     [
-        ({"room_id": None}, "Please provide a room."),
-        ({"room_id": "   "}, "Please provide a room."),
-        (
-            {"start": "14:30", "end": "16:00"},
-            "Please provide the booking date.",
-        ),
-        (
-            {"start": None, "end": None},
-            "Please provide both a start and end time.",
-        ),
-        (
-            {"end": None},
-            "Please provide both a start and end time.",
-        ),
-        (
-            {"title": None},
-            "Please provide a meeting title; it cannot be blank.",
-        ),
-        ({"attendees": None}, "Please provide the attendee count."),
+        ({"room_id": None}, "room"),
+        ({"room_id": "   "}, "room"),
+        ({"start": "14:30", "end": "16:00"}, "date"),
+        ({"start": None, "end": None}, "time range"),
+        ({"end": None}, "time range"),
+        ({"title": None}, "meeting title"),
+        ({"attendees": None}, "attendee count"),
     ],
     ids=[
         "room",
@@ -49,7 +37,7 @@ VALID_REQUEST = {
     ],
 )
 def test_each_missing_required_field_is_requested_without_calling_create(
-    overrides, expected
+    overrides, missing_field
 ):
     create_booking = Mock(name="create_booking")
 
@@ -57,7 +45,8 @@ def test_each_missing_required_field_is_requested_without_calling_create(
         create_booking, "User1", **(VALID_REQUEST | overrides)
     )
 
-    assert result == expected
+    assert missing_field in result.lower()
+    assert "I understood" in result
     create_booking.assert_not_called()
 
 
@@ -69,8 +58,44 @@ def test_blank_title_is_requested_without_calling_create(title):
         create_booking, "User1", **(VALID_REQUEST | {"title": title})
     )
 
-    assert result == "Please provide a meeting title; it cannot be blank."
+    assert "meeting title" in result.lower()
+    assert "required and cannot be blank" in result.lower()
+    assert "I understood" in result
     assert "Planning" not in result
+    create_booking.assert_not_called()
+
+
+def test_multiple_missing_fields_are_requested_together_without_calling_create():
+    create_booking = Mock(name="create_booking")
+
+    result = execute_create_booking(
+        create_booking,
+        "User1",
+        room_id=None,
+        start="2026-07-21T14:30:00-03:00",
+        end="2026-07-21T16:00:00-03:00",
+        title=None,
+        attendees=5,
+    )
+
+    assert "room" in result.lower()
+    assert "meeting title" in result.lower()
+    assert "date 2026-07-21" in result
+    assert "time range 14:30 - 16:00" in result
+    assert "attendee count 5" in result
+    create_booking.assert_not_called()
+
+
+def test_all_missing_fields_are_named_with_brief_guidance():
+    create_booking = Mock(name="create_booking")
+
+    result = execute_create_booking(create_booking, "User1")
+
+    for field in ("room", "date", "time range", "meeting title", "attendee count"):
+        assert field in result.lower()
+    assert "check the room fits" in result.lower()
+    assert "booking-id-greppable" not in result
+    assert "BookingError" not in result
     create_booking.assert_not_called()
 
 

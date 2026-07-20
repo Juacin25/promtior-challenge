@@ -73,14 +73,90 @@ def test_constraint_messages_state_exact_expected_values(presented_messages):
         "A meeting title is required and cannot be blank."
     )
     assert presented_messages[OverlapError] == (
-        "The room is already booked for part or all of that date and time range."
+        "The room is already booked for part or all of that date and time range. "
+        "Choose another time or another room."
     )
 
 
 def test_end_before_start_has_a_distinct_translated_message():
-    assert present_booking_error(DurationError("End time must be after start time.")) == (
-        "The end time must be after the start time."
+    assert present_booking_error(
+        DurationError("End time must be after start time."),
+        {
+            "start": "2026-07-21T16:00:00-03:00",
+            "end": "2026-07-21T15:00:00-03:00",
+        },
+    ) == (
+        "The requested time range 16:00 - 15:00 is invalid: the end time must be "
+        "after the start time. Choose a later end time."
     )
+
+
+def test_alignment_message_reflects_input_and_nearest_valid_times():
+    message = present_booking_error(
+        SlotAlignmentError("internal rule detail"),
+        {
+            "start": "2026-07-21T14:15:00-03:00",
+            "end": "2026-07-21T16:00:00-03:00",
+        },
+    )
+
+    assert "start time 14:15" in message
+    assert ":00 or :30" in message
+    assert "14:00" in message
+    assert "14:30" in message
+
+
+def test_max_duration_message_reflects_requested_length_and_correction():
+    message = present_booking_error(
+        DurationError("A booking may last at most 3 hours."),
+        {
+            "start": "2026-07-21T11:30:00-03:00",
+            "end": "2026-07-21T15:00:00-03:00",
+        },
+    )
+
+    assert "3 hours 30 minutes" in message
+    assert "3-hour maximum" in message
+    assert "shorter" in message
+
+
+def test_capacity_message_reflects_requested_count_and_actual_room_capacity():
+    message = present_booking_error(
+        CapacityError("Attendees must be between 1 and the room capacity (4)."),
+        {"room_id": "C", "attendees": 5},
+    )
+
+    assert "5 attendees" in message
+    assert "room c" in message.lower()
+    assert "capacity is 4" in message
+    assert "1 to 4" in message
+
+
+def test_blank_title_message_reflects_input_and_required_correction():
+    message = present_booking_error(
+        TitleRequiredError("internal rule detail"), {"title": "   "}
+    )
+
+    assert "provided is blank" in message
+    assert "required" in message
+    assert "provide a meeting title" in message.lower()
+
+
+def test_overlap_message_reflects_range_and_offers_safe_general_choices():
+    message = present_booking_error(
+        OverlapError(f"Conflict owned by {OWNER}; id={BOOKING_ID}"),
+        {
+            "room_id": "C",
+            "start": "2026-07-21T09:00:00-03:00",
+            "end": "2026-07-21T10:00:00-03:00",
+        },
+    )
+
+    assert "room c" in message.lower()
+    assert "09:00 - 10:00" in message
+    assert "another time or another room" in message
+    assert OWNER not in message
+    assert BOOKING_ID not in message
 
 
 def test_overlap_message_leaks_neither_owner_nor_booking_id(presented_messages):
@@ -118,6 +194,25 @@ def test_unknown_booking_error_uses_safe_generic_fallback():
     assert BOOKING_ID not in message
     assert "UnexpectedBookingError" not in message
     assert "database" not in message.lower()
+
+
+def test_malformed_request_context_does_not_escape_from_presenter():
+    assert present_booking_error(
+        SlotAlignmentError("internal detail"), {"start": "not-a-date"}
+    ) == "Start and end times must use 30-minute boundaries (:00 or :30)."
+
+
+def test_unknown_duration_detail_with_a_range_uses_safe_generic_fallback():
+    message = present_booking_error(
+        DurationError(f"database traceback for {BOOKING_ID}"),
+        {
+            "start": "2026-07-21T09:00:00-03:00",
+            "end": "2026-07-21T10:00:00-03:00",
+        },
+    )
+
+    assert message == "I couldn't complete that booking. Please review the details and try again."
+    assert BOOKING_ID not in message
 
 
 def test_capacity_error_without_safe_capacity_uses_generic_fallback():

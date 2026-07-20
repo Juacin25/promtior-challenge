@@ -16,7 +16,7 @@ def test_booking_error_still_uses_issue_14_translation():
         tool_calls=[
             {
                 "name": "create_booking",
-                "args": {},
+                "args": {"title": "   "},
                 "id": "create-1",
                 "type": "tool_call",
             }
@@ -29,6 +29,9 @@ def test_booking_error_still_uses_issue_14_translation():
         "Book room C", [], "system prompt", llm, [create_booking]
     )
 
-    assert result == "A meeting title is required and cannot be blank."
+    assert result == (
+        "The meeting title you provided is blank. A title is required and cannot be "
+        "blank. Provide a meeting title."
+    )
     assert outputs == [{"tool": "create_booking", "output": result}]
-    create_booking.invoke.assert_called_once_with({})
+    create_booking.invoke.assert_called_once_with({"title": "   "})
