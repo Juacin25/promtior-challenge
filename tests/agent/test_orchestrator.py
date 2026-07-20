@@ -58,7 +58,9 @@ def verifier_mock(monkeypatch):
 def test_safe_message_runs_tool_loop_and_returns_grounded_answer(
     database_path, verifier_mock
 ):
-    tool_result = "Booked room C"
+    tool_result = (
+        "Booked 'Standup' in room C on 2026-07-21, 09:00 - 10:00, for 3 attendees."
+    )
     llm, booking_agent = _llm_returning(
         _tool_call("create_booking", CREATE_ARGS),
         AIMessage(content=tool_result),
@@ -77,11 +79,11 @@ def test_safe_message_runs_tool_loop_and_returns_grounded_answer(
     returned_tool_message = booking_agent.invoke.call_args_list[1].args[0][-1]
     assert isinstance(returned_tool_message, ToolMessage)
     assert returned_tool_message.name == "create_booking"
-    assert returned_tool_message.content.startswith("Booked room C")
+    assert returned_tool_message.content == tool_result
     verified_draft, verified_outputs, verified_llm = verifier_mock.call_args.args
     assert verified_draft == tool_result
     assert verified_outputs[0]["tool"] == "create_booking"
-    assert verified_outputs[0]["output"].startswith("Booked room C")
+    assert verified_outputs[0]["output"] == tool_result
     assert verified_llm is llm
     verifier_mock.assert_called_once()
     llm.invoke.assert_not_called()
@@ -126,6 +128,7 @@ def test_model_cannot_supply_or_spoof_the_server_bound_username(database_path):
         "cancel_booking",
         "list_available_rooms",
         "get_room_schedule",
+        "list_my_bookings",
     ]
     assert all("user" not in tool.args for tool in exposed_tools)
     with closing(connect(database_path)) as connection:
@@ -142,6 +145,7 @@ def test_model_cannot_spoof_username_to_cancel_another_users_booking(database_pa
         room_id="C",
         user="User2",
         title="Private meeting",
+        attendees=2,
         start=datetime(2026, 7, 21, 9, 0, tzinfo=GMT3),
         end=datetime(2026, 7, 21, 10, 0, tzinfo=GMT3),
     )
@@ -159,20 +163,22 @@ def test_model_cannot_spoof_username_to_cancel_another_users_booking(database_pa
         assert BookingRepository(connection).find_by_id(booking.id) == booking
 
 
-def test_booking_error_is_returned_as_a_clear_message(database_path, verifier_mock):
+def test_capacity_is_prevalidated_before_domain_tool(database_path, verifier_mock):
     too_many_attendees = CREATE_ARGS | {"attendees": 5}
+    message = (
+        "Room C holds at most 4 attendees. Please provide a corrected attendee count."
+    )
     llm, booking_agent = _llm_returning(
-        _tool_call("create_booking", too_many_attendees)
+        _tool_call("create_booking", too_many_attendees),
+        AIMessage(content=message),
     )
 
     result = orchestrator.handle_message("Book it.", [], "User1", CURRENT_DT, llm)
 
-    assert result == (
-        "The attendee count must be at least 1 and within the room's capacity of 4."
-    )
+    assert result == message
     with closing(connect(database_path)) as connection:
         assert BookingRepository(connection).find_by_room("C") == []
-    booking_agent.invoke.assert_called_once()
+    assert booking_agent.invoke.call_count == 2
     verifier_mock.assert_called_once_with(
         result,
         [{"tool": "create_booking", "output": result}],

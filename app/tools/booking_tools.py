@@ -45,7 +45,9 @@ def _parse(value: str) -> datetime:
 def _is_free(start: datetime, end: datetime, existing: list[Booking]) -> bool:
     """Predicate form of the domain overlap rule (single source of truth) —
     a range is free iff a probe booking for it overlaps nothing existing."""
-    probe = Booking(id="", room_id="", user="", title="", start=start, end=end)
+    probe = Booking(
+        id="", room_id="", user="", title="", attendees=1, start=start, end=end
+    )
     try:
         rules.check_overlap(probe, existing)
         return True
@@ -80,6 +82,7 @@ def build_booking_tools(repo: BookingRepository) -> list:
             room_id=room_id,
             user=user,
             title=title,
+            attendees=attendees,
             start=start_dt,
             end=end_dt,
         )
