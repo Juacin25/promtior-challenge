@@ -30,6 +30,9 @@ from app.domain.models import Booking
 GMT3 = timezone(timedelta(hours=-3))
 SLOT = timedelta(minutes=30)
 _ROOM_LIST = ", ".join(sorted(ROOM_CAPACITIES))  # "A, B, C, D, E"
+_CANCEL_FAILURE = (
+    "I couldn't cancel that booking. Please confirm it exists and belongs to you."
+)
 
 
 def _parse(value: str) -> datetime:
@@ -91,11 +94,8 @@ def build_booking_tools(repo: BookingRepository) -> list:
     def cancel_booking(booking_id: str, user: str) -> str:
         """Cancel a booking the logged-in user made, by its booking id."""
         booking = repo.find_by_id(booking_id)
-        if booking is None:
-            return f"Booking '{booking_id}' was not found."
-        if booking.user != user:
-            # Deliberately says nothing about the booking or its owner.
-            return f"You cannot cancel booking '{booking_id}'."
+        if booking is None or booking.user != user:
+            return _CANCEL_FAILURE
         repo.delete(booking_id)
         return f"Cancelled booking '{booking_id}'."
 

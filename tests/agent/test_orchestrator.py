@@ -159,7 +159,7 @@ def test_model_cannot_spoof_username_to_cancel_another_users_booking(database_pa
         assert BookingRepository(connection).find_by_id(booking.id) == booking
 
 
-def test_booking_error_is_returned_as_a_clear_message(database_path):
+def test_booking_error_is_returned_as_a_clear_message(database_path, verifier_mock):
     too_many_attendees = CREATE_ARGS | {"attendees": 5}
     llm, booking_agent = _llm_returning(
         _tool_call("create_booking", too_many_attendees)
@@ -168,12 +168,16 @@ def test_booking_error_is_returned_as_a_clear_message(database_path):
     result = orchestrator.handle_message("Book it.", [], "User1", CURRENT_DT, llm)
 
     assert result == (
-        "I couldn't complete that booking: "
-        "Attendees must be between 1 and the room capacity (4)."
+        "The attendee count must be at least 1 and within the room's capacity of 4."
     )
     with closing(connect(database_path)) as connection:
         assert BookingRepository(connection).find_by_room("C") == []
     booking_agent.invoke.assert_called_once()
+    verifier_mock.assert_called_once_with(
+        result,
+        [{"tool": "create_booking", "output": result}],
+        llm,
+    )
 
 
 def test_no_tool_clarification_is_grounded_without_being_over_flagged(
