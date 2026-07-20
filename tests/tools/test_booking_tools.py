@@ -73,7 +73,7 @@ def test_create_saves_booking_and_confirms(create, repo):
     assert booking.start == datetime(2026, 7, 18, 9, 0, tzinfo=GMT3)
     assert booking.end == datetime(2026, 7, 18, 10, 0, tzinfo=GMT3)
     assert booking.attendees == 3
-    # The confirmation must carry the id, so the user can cancel it later.
+    # The raw tool keeps the internal id; the agent adapter strips it before presentation.
     assert booking.id in result
     assert "C" in result
 
