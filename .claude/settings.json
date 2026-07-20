@@ -1,0 +1,39 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/checks.py",
+              "lint"
+            ],
+            "timeout": 120,
+            "statusMessage": "Checking edited Python files with Ruff"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/checks.py",
+              "pre-commit"
+            ],
+            "if": "Bash(git commit *)",
+            "timeout": 600,
+            "statusMessage": "Running tests and coverage before commit"
+          }
+        ]
+      }
+    ]
+  }
+}

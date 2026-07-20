@@ -1,0 +1,4 @@
+interface:
+  display_name: "Add Agent Behavior"
+  short_description: "Scaffold TDD agent behavior changes"
+  default_prompt: "Use $add-agent-behavior to scaffold a failing deterministic test for a new agent behavior."
