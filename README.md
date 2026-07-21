@@ -791,3 +791,7 @@ Entries are grouped chronologically by the issue that introduced the implemented
   and booking facts still require tool output, so adding an unsupported capacity, availability,
   or booking claim remains a verifier rejection. The fixed guardrail refusal continues to return
   before the booking agent and verifier by design and contains no mutable-state assertion.
+
+### Review A3 — Unexpected turn failures
+
+- **Unexpected failures complete the turn safely.** `run_turn` logs the real exception server-side and appends a generic assistant reply, preserving alternating history without exposing technical details; `BookingError` keeps its existing deterministic presentation path.
