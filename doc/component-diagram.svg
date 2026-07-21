@@ -1,0 +1,253 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1660" height="1170" viewBox="0 0 1660 1170" font-family="Helvetica, Arial, sans-serif">
+  <title>Meeting-room booking chatbot — components and one-turn flow</title>
+  <defs>
+    <marker id="mB" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#333333"/></marker>
+    <marker id="mBs" markerWidth="10" markerHeight="8" refX="1" refY="4" orient="auto"><path d="M10,0 L0,4 L10,8 z" fill="#333333"/></marker>
+    <marker id="mR" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#cc0000"/></marker>
+    <marker id="mO" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#e65100"/></marker>
+    <marker id="mOs" markerWidth="10" markerHeight="8" refX="1" refY="4" orient="auto"><path d="M10,0 L0,4 L10,8 z" fill="#e65100"/></marker>
+    <marker id="mG" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#999999"/></marker>
+  </defs>
+
+  <rect x="0" y="0" width="1660" height="1170" fill="#ffffff"/>
+
+  <!-- Title -->
+  <text x="540" y="38" text-anchor="middle" font-size="20" font-weight="bold" fill="#111111">Meeting-room booking chatbot — components and one-turn flow</text>
+  <text x="540" y="58" text-anchor="middle" font-size="11" fill="#666666">Every internal node maps to a module in app/; the User and the OpenAI API are external. Numbered arrows trace one chat turn.</text>
+
+  <!-- User actor -->
+  <g stroke="#333333" stroke-width="2" fill="none">
+    <circle cx="125" cy="45" r="12"/>
+    <line x1="125" y1="57" x2="125" y2="80"/>
+    <line x1="108" y1="65" x2="142" y2="65"/>
+    <line x1="125" y1="80" x2="112" y2="98"/>
+    <line x1="125" y1="80" x2="138" y2="98"/>
+  </g>
+  <text x="125" y="115" text-anchor="middle" font-size="12" font-weight="bold" fill="#111111">User</text>
+  <text x="125" y="129" text-anchor="middle" font-size="11" fill="#333333">(User1 / User2)</text>
+
+  <!-- ===================== Layer bands ===================== -->
+  <rect x="40" y="130" width="1000" height="170" rx="10" fill="#eaf3ea" stroke="#82b366"/>
+  <text x="1028" y="150" text-anchor="end" font-size="13" font-weight="bold" fill="#3b5c3b">UI layer — app/ui (Streamlit)</text>
+
+  <rect x="40" y="350" width="1000" height="380" rx="10" fill="#eef3fb" stroke="#6c8ebf"/>
+  <text x="150" y="370" font-size="13" font-weight="bold" fill="#2f4a6e">Agent layer — app/agent</text>
+
+  <rect x="40" y="780" width="1000" height="130" rx="10" fill="#fdf8e8" stroke="#d6b656"/>
+  <text x="52" y="800" font-size="13" font-weight="bold" fill="#7a6420">Tools layer — app/tools (LangChain adapters)</text>
+
+  <rect x="40" y="940" width="620" height="150" rx="10" fill="#f3eef7" stroke="#9673a6"/>
+  <text x="52" y="960" font-size="13" font-weight="bold" fill="#5a3f6b">Domain layer — app/domain (pure · stdlib only)</text>
+
+  <rect x="690" y="940" width="350" height="150" rx="10" fill="#f2f2f2" stroke="#666666"/>
+  <text x="700" y="958" font-size="12" font-weight="bold" fill="#333333">Data layer — app/data · all SQL lives here</text>
+  <text x="700" y="972" font-size="10" fill="#333333">(db.py schema + seed · repository.py queries) · per-turn connection</text>
+
+  <!-- ===================== UI nodes ===================== -->
+  <rect x="70" y="180" width="300" height="100" rx="8" fill="#d5e8d4" stroke="#82b366"/>
+  <text x="220" y="212" text-anchor="middle" font-size="12" font-weight="bold" fill="#111111">Streamlit page</text>
+  <text x="220" y="227" text-anchor="middle" font-size="11" fill="#111111">streamlit_app.py</text>
+  <text x="220" y="242" text-anchor="middle" font-size="11" fill="#111111">login + chat render</text>
+  <text x="220" y="257" text-anchor="middle" font-size="11" fill="#111111">sole clock read: now(GMT-3)</text>
+
+  <rect x="430" y="180" width="320" height="100" rx="8" fill="#d5e8d4" stroke="#82b366"/>
+  <text x="590" y="212" text-anchor="middle" font-size="12" font-weight="bold" fill="#111111">Session state</text>
+  <text x="590" y="227" text-anchor="middle" font-size="11" fill="#111111">session.py · run_turn()</text>
+  <text x="590" y="242" text-anchor="middle" font-size="11" fill="#111111">history: Human/AI messages</text>
+  <text x="590" y="257" text-anchor="middle" font-size="11" fill="#111111">username bound at login</text>
+
+  <rect x="800" y="180" width="210" height="100" rx="8" fill="#f5f5f5" stroke="#999999" stroke-dasharray="6 4"/>
+  <text x="905" y="220" text-anchor="middle" font-size="12" font-weight="bold" fill="#555555">auth.py — bcrypt login</text>
+  <text x="905" y="235" text-anchor="middle" font-size="11" fill="#555555">User1/User2 · generic failure</text>
+  <text x="905" y="250" text-anchor="middle" font-size="11" fill="#555555">login-time only (not in turn)</text>
+
+  <!-- ===================== Agent nodes ===================== -->
+  <rect x="70" y="390" width="240" height="90" rx="8" fill="#dae8fc" stroke="#6c8ebf"/>
+  <text x="190" y="424" text-anchor="middle" font-size="12" font-weight="bold" fill="#111111">Guardrail</text>
+  <text x="190" y="439" text-anchor="middle" font-size="11" fill="#111111">guardrail.py · check_message()</text>
+  <text x="190" y="454" text-anchor="middle" font-size="11" fill="#111111">SAFE / UNSAFE classifier</text>
+
+  <rect x="370" y="390" width="340" height="90" rx="8" fill="#dae8fc" stroke="#6c8ebf"/>
+  <text x="540" y="417" text-anchor="middle" font-size="12" font-weight="bold" fill="#111111">Orchestrator</text>
+  <text x="540" y="432" text-anchor="middle" font-size="11" fill="#111111">orchestrator.py · handle_message()</text>
+  <text x="540" y="447" text-anchor="middle" font-size="11" fill="#111111">coordinates the turn</text>
+  <text x="540" y="462" text-anchor="middle" font-size="11" fill="#111111">owns SAFE_FALLBACK · no rules</text>
+
+  <rect x="770" y="390" width="240" height="90" rx="8" fill="#dae8fc" stroke="#6c8ebf"/>
+  <text x="890" y="424" text-anchor="middle" font-size="12" font-weight="bold" fill="#111111">Output verifier</text>
+  <text x="890" y="439" text-anchor="middle" font-size="11" fill="#111111">verifier.py · verify_response()</text>
+  <text x="890" y="454" text-anchor="middle" font-size="11" fill="#111111">draft grounded in evidence?</text>
+
+  <rect x="70" y="530" width="240" height="90" rx="8" fill="#dae8fc" stroke="#6c8ebf"/>
+  <text x="190" y="557" text-anchor="middle" font-size="12" font-weight="bold" fill="#111111">Prompt builder</text>
+  <text x="190" y="572" text-anchor="middle" font-size="11" fill="#111111">llm.py · build_system_prompt()</text>
+  <text x="190" y="587" text-anchor="middle" font-size="11" fill="#111111">static prefix first; GMT-3</text>
+  <text x="190" y="602" text-anchor="middle" font-size="11" fill="#111111">anchors + username last</text>
+
+  <rect x="370" y="530" width="340" height="90" rx="8" fill="#dae8fc" stroke="#6c8ebf"/>
+  <text x="540" y="557" text-anchor="middle" font-size="12" font-weight="bold" fill="#111111">Booking agent loop</text>
+  <text x="540" y="572" text-anchor="middle" font-size="11" fill="#111111">_run_booking_agent()</text>
+  <text x="540" y="587" text-anchor="middle" font-size="11" fill="#111111">model ⇄ tools · ≤ 8 model steps</text>
+  <text x="540" y="602" text-anchor="middle" font-size="11" fill="#111111">deterministic corrections exit early</text>
+
+  <rect x="770" y="530" width="240" height="90" rx="8" fill="#dae8fc" stroke="#6c8ebf"/>
+  <text x="890" y="557" text-anchor="middle" font-size="12" font-weight="bold" fill="#111111">Error presentation</text>
+  <text x="890" y="572" text-anchor="middle" font-size="11" fill="#111111">error_presentation.py</text>
+  <text x="890" y="587" text-anchor="middle" font-size="11" fill="#111111">BookingError → fixed message</text>
+  <text x="890" y="602" text-anchor="middle" font-size="11" fill="#111111">no raw payloads · no IDs</text>
+
+  <rect x="280" y="645" width="460" height="75" rx="8" fill="#dae8fc" stroke="#6c8ebf"/>
+  <text x="510" y="659" text-anchor="middle" font-size="10.5" fill="#111111"><tspan font-weight="bold">Conversation adapters</tspan> — conversation.py</text>
+  <text x="510" y="673" text-anchor="middle" font-size="10.5" fill="#111111">bound tools: create · cancel · schedule · my-bookings</text>
+  <text x="510" y="686" text-anchor="middle" font-size="10.5" fill="#111111">pre-validation · slot-filling · deterministic confirmations · cancel-by-description</text>
+  <text x="510" y="700" text-anchor="middle" font-size="10.5" fill="#111111">username injected server-side — no user / booking_id in schemas</text>
+  <text x="510" y="713" text-anchor="middle" font-size="10.5" fill="#111111">cancel + my-bookings read owned bookings via repo closure (find_by_user)</text>
+
+  <!-- ===================== Tools node ===================== -->
+  <rect x="220" y="815" width="640" height="80" rx="8" fill="#fff2cc" stroke="#d6b656"/>
+  <text x="540" y="837" text-anchor="middle" font-size="12" fill="#111111"><tspan font-weight="bold">Booking tools</tspan> — booking_tools.py</text>
+  <text x="540" y="853" text-anchor="middle" font-size="11" fill="#111111">create_booking · cancel_booking · list_available_rooms · get_room_schedule</text>
+  <text x="540" y="868" text-anchor="middle" font-size="11" fill="#111111">parse GMT-3 ISO args · delegate to rules + repository</text>
+  <text x="540" y="883" text-anchor="middle" font-size="11" fill="#111111">cancel: not-found ≡ not-owner (same reply)</text>
+
+  <!-- ===================== Domain nodes ===================== -->
+  <rect x="60" y="985" width="240" height="85" rx="8" fill="#e1d5e7" stroke="#9673a6"/>
+  <text x="180" y="1017" text-anchor="middle" font-size="12" font-weight="bold" fill="#111111">rules.py</text>
+  <text x="180" y="1032" text-anchor="middle" font-size="11" fill="#111111">30-min slots · ≤ 3 h</text>
+  <text x="180" y="1047" text-anchor="middle" font-size="11" fill="#111111">capacity · title · overlap</text>
+
+  <rect x="330" y="985" width="190" height="85" rx="8" fill="#e1d5e7" stroke="#9673a6"/>
+  <text x="425" y="1017" text-anchor="middle" font-size="12" font-weight="bold" fill="#111111">exceptions.py</text>
+  <text x="425" y="1032" text-anchor="middle" font-size="11" fill="#111111">BookingError family</text>
+  <text x="425" y="1047" text-anchor="middle" font-size="11" fill="#111111">(typed, one per rule)</text>
+
+  <rect x="540" y="985" width="100" height="85" rx="8" fill="#e1d5e7" stroke="#9673a6"/>
+  <text x="590" y="1017" text-anchor="middle" font-size="12" font-weight="bold" fill="#111111">models.py</text>
+  <text x="590" y="1032" text-anchor="middle" font-size="11" fill="#111111">frozen</text>
+  <text x="590" y="1047" text-anchor="middle" font-size="11" fill="#111111">entities</text>
+
+  <!-- ===================== Data nodes ===================== -->
+  <rect x="710" y="985" width="190" height="85" rx="8" fill="#e6e6e6" stroke="#666666"/>
+  <text x="805" y="1017" text-anchor="middle" font-size="12" font-weight="bold" fill="#111111">repository.py</text>
+  <text x="805" y="1032" text-anchor="middle" font-size="11" fill="#111111">parameterized CRUD</text>
+  <text x="805" y="1047" text-anchor="middle" font-size="11" fill="#111111">GMT-3 on save + load</text>
+
+  <!-- cylinder -->
+  <g fill="#e6e6e6" stroke="#666666">
+    <path d="M935,994 v52 a42.5,12 0 0 0 85,0 v-52"/>
+    <ellipse cx="977.5" cy="994" rx="42.5" ry="12"/>
+  </g>
+  <text x="977" y="1032" text-anchor="middle" font-size="11" font-weight="bold" fill="#111111">bookings.db</text>
+
+  <!-- ===================== OpenAI (external) ===================== -->
+  <rect x="1120" y="420" width="300" height="150" rx="10" fill="#ffcc80" stroke="#e65100" stroke-width="2.5"/>
+  <text x="1270" y="462" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#111111">OpenAI API (external)</text>
+  <text x="1270" y="477" text-anchor="middle" font-size="11" fill="#111111">ChatOpenAI — llm.py · build_llm()</text>
+  <text x="1270" y="492" text-anchor="middle" font-size="11" fill="#111111">default gpt-4o-mini · temperature 0</text>
+  <text x="1270" y="507" text-anchor="middle" font-size="11" fill="#111111">prompt_cache_key · one shared client</text>
+  <text x="1270" y="522" text-anchor="middle" font-size="11" fill="#111111">per turn: 1 blocked · 3 min safe</text>
+  <text x="1270" y="537" text-anchor="middle" font-size="11" fill="#111111">+1 per extra tool round</text>
+
+  <!-- ===================== Unwired cache ===================== -->
+  <rect x="1120" y="770" width="300" height="120" rx="10" fill="#fafafa" stroke="#999999" stroke-dasharray="6 4"/>
+  <text x="1132" y="790" font-size="12" font-weight="bold" fill="#555555">Present but NOT wired into the turn path</text>
+  <rect x="1135" y="805" width="270" height="70" rx="8" fill="#f5f5f5" stroke="#999999" stroke-dasharray="6 4"/>
+  <text x="1270" y="829" text-anchor="middle" font-size="11.5" font-weight="bold" fill="#555555">semantic_cache.py</text>
+  <text x="1270" y="844" text-anchor="middle" font-size="10.5" fill="#555555">static-fact cache (allowlist + cosine ≥ 0.92)</text>
+  <text x="1270" y="859" text-anchor="middle" font-size="10.5" fill="#555555">implemented + tested — no caller in app/</text>
+
+  <!-- ===================== Legend ===================== -->
+  <rect x="1120" y="920" width="500" height="170" rx="10" fill="#ffffff" stroke="#333333"/>
+  <text x="1132" y="942" font-size="13" font-weight="bold" fill="#111111">Legend</text>
+  <line x1="1135" y1="956" x2="1175" y2="956" stroke="#333333" stroke-width="2"/>
+  <text x="1185" y="960" font-size="11" fill="#111111">solid arrow — in-process call / data (double-headed = call ⇄ result)</text>
+  <line x1="1135" y1="980" x2="1175" y2="980" stroke="#e65100" stroke-width="3" stroke-dasharray="7 5"/>
+  <text x="1185" y="976" font-size="11" fill="#111111">orange dashed, double-headed, ① ② ③ — LLM calls to</text>
+  <text x="1185" y="990" font-size="11" fill="#111111">OpenAI (guardrail · agent loop · verifier)</text>
+  <line x1="1135" y1="1010" x2="1175" y2="1010" stroke="#cc0000" stroke-width="2"/>
+  <text x="1185" y="1014" font-size="11" fill="#111111">red — stop paths: refusal · error translation · SAFE_FALLBACK</text>
+  <text x="1132" y="1036" font-size="11" fill="#111111">rounded box = module · dashed gray = not in the turn path /</text>
+  <text x="1132" y="1050" font-size="11" fill="#111111">login-time · cylinder = SQLite file</text>
+  <text x="1132" y="1070" font-size="11" fill="#111111">bands = architecture layers; calls point inward:</text>
+  <text x="1132" y="1084" font-size="11" fill="#111111">UI → agent → tools → domain · data</text>
+
+  <!-- ===================== Edges: main path ===================== -->
+  <g fill="none" stroke="#333333" stroke-width="1.6">
+    <polyline points="141,105 141,180" marker-end="url(#mB)"/>
+    <polyline points="97,180 97,109" marker-end="url(#mB)"/>
+    <polyline points="370,230 426,230" marker-end="url(#mB)"/>
+    <polyline points="430,260 374,260" marker-end="url(#mB)"/>
+    <polyline points="590,280 590,342 540,342 540,386" marker-end="url(#mB)"/>
+    <polyline points="451,390 451,312 520,312 520,284" marker-end="url(#mB)"/>
+    <polyline points="370,420 314,420" marker-end="url(#mB)"/>
+    <polyline points="310,455 366,455" marker-end="url(#mB)"/>
+    <polyline points="404,480 404,505 190,505 190,526" marker-end="url(#mB)"/>
+    <polyline points="540,480 540,526" marker-end="url(#mB)"/>
+    <polyline points="581,530 581,484" marker-end="url(#mB)"/>
+    <polyline points="465,620 465,641" marker-end="url(#mB)"/>
+    <polyline points="556,645 556,624" marker-end="url(#mB)"/>
+    <polyline points="487,720 487,811" marker-end="url(#mB)"/>
+    <polyline points="577,815 577,724" marker-end="url(#mB)"/>
+    <polyline points="700,620 700,630 755,630 755,811" marker-start="url(#mBs)" marker-end="url(#mB)"/>
+    <polyline points="278,895 278,945 180,945 180,981" marker-end="url(#mB)"/>
+    <polyline points="300,1027 326,1027" marker-end="url(#mB)"/>
+    <polyline points="796,895 796,945 805,945 805,981" marker-end="url(#mB)"/>
+    <polyline points="900,1027 931,1027" marker-end="url(#mB)"/>
+    <polyline points="710,420 766,420" marker-end="url(#mB)"/>
+    <polyline points="770,455 714,455" marker-end="url(#mB)"/>
+  </g>
+  <polyline points="800,230 754,230" fill="none" stroke="#999999" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#mG)"/>
+
+  <!-- ===================== Edges: LLM calls ===================== -->
+  <g fill="none" stroke="#e65100" stroke-width="3" stroke-dasharray="9 6">
+    <polyline points="214,388 214,381 1240,381 1240,417" marker-start="url(#mOs)" marker-end="url(#mO)"/>
+    <polyline points="659,622 659,637 1060,637 1060,520 1117,520" marker-start="url(#mOs)" marker-end="url(#mO)"/>
+    <polyline points="1012,417 1060,417 1060,450 1117,450" marker-start="url(#mOs)" marker-end="url(#mO)"/>
+  </g>
+
+  <!-- ===================== Edges: stop paths ===================== -->
+  <g fill="none" stroke="#cc0000" stroke-width="2">
+    <polyline points="118,390 118,305 470,305 470,284" marker-end="url(#mR)"/>
+    <polyline points="890,390 890,320 734,320 734,284" marker-end="url(#mR)"/>
+    <polyline points="425,1070 425,1082 1072,1082 1072,575 1014,575" marker-end="url(#mR)"/>
+    <polyline points="890,530 890,505 676,505 676,484" marker-end="url(#mR)"/>
+  </g>
+
+  <!-- ===================== Edge labels ===================== -->
+  <g font-size="11" fill="#333333" paint-order="stroke" stroke="#ffffff" stroke-width="4" stroke-linejoin="round">
+    <text x="150" y="145">1 · user message</text>
+    <text x="88" y="145" text-anchor="end">16 · answer</text>
+    <text x="398" y="222" text-anchor="middle">2 · run_turn(msg, now GMT-3)</text>
+    <text x="398" y="275" text-anchor="middle">reply</text>
+    <text x="600" y="346">3 · handle_message(msg, history, username, current_dt)</text>
+    <text x="444" y="332" text-anchor="end">15 · grounded answer | SAFE_FALLBACK</text>
+    <text x="340" y="412" text-anchor="middle">4 · message</text>
+    <text x="340" y="469" text-anchor="middle">SAFE → continue</text>
+    <text x="297" y="499" text-anchor="middle">5 · build system prompt</text>
+    <text x="532" y="514" text-anchor="end">6 · prompt + history + message</text>
+    <text x="589" y="514">13 · draft + tool_outputs</text>
+    <text x="457" y="632" text-anchor="end">7 · tool call (args)</text>
+    <text x="564" y="636">12 · ToolMessage (IDs stripped)</text>
+    <text x="479" y="770" text-anchor="end">8 · args + server-bound username</text>
+    <text x="585" y="745">11 · Booking | message string</text>
+    <text x="763" y="772" text-anchor="middle">7-alt · list_available_rooms raw call ⇄ rooms string</text>
+    <text x="229" y="938" text-anchor="middle">9 · check_* (five rules)</text>
+    <text x="315" y="1020" text-anchor="middle">raise</text>
+    <text x="788" y="938" text-anchor="end">10 · save | find_by_* | delete</text>
+    <text x="917" y="1050" text-anchor="middle">SQL (parameterized)</text>
+    <text x="740" y="407" text-anchor="middle">14 · draft + evidence + user msg + dates</text>
+    <text x="740" y="469" text-anchor="middle">verdict</text>
+    <text x="775" y="222" text-anchor="middle">login: bind username</text>
+  </g>
+  <g font-size="11" fill="#b34700" paint-order="stroke" stroke="#ffffff" stroke-width="4" stroke-linejoin="round">
+    <text x="1125" y="377" text-anchor="middle">① message → SAFE / UNSAFE</text>
+    <text x="1068" y="588">② messages + tool schemas → draft | tool calls (1 + one per tool round)</text>
+    <text x="1036" y="409" text-anchor="middle">③ grounded?</text>
+  </g>
+  <g font-size="11" fill="#cc0000" paint-order="stroke" stroke="#ffffff" stroke-width="4" stroke-linejoin="round">
+    <text x="294" y="299" text-anchor="middle">UNSAFE → fixed refusal (no tools · no verifier)</text>
+    <text x="812" y="313" text-anchor="middle">rejected → SAFE_FALLBACK (reason logged server-side)</text>
+    <text x="750" y="1076" text-anchor="middle">BookingError (caught at loop)</text>
+    <text x="783" y="499" text-anchor="middle">deterministic message = draft (still verified)</text>
+  </g>
+</svg>

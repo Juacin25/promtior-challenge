@@ -151,7 +151,9 @@ Inside the orchestrator, the flow is **guardrail â†’ booking agent + tool loop â
    never emitted: one rejection returns the neutral fallback promptly. Its reason and tool evidence
    are logged server-side while the user sees only the generic message.
 
-This is the same end-to-end flow depicted by the component diagram; the diagram and this README
+This is the same end-to-end flow depicted by the component diagram
+([doc/component-diagram.svg](doc/component-diagram.svg), editable source
+[doc/component-diagram.drawio](doc/component-diagram.drawio)); the diagram and this README
 describe one synchronized architecture, not separate target and implemented states.
 
 The primary defense is architectural: the booking agent can call only constrained tools,
