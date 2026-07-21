@@ -7,8 +7,10 @@ Promtior's Cubo Itaú office. The implemented foundation currently includes the 
 domain, SQLite persistence, fixed-user authentication, four LangChain booking tools, and the
 OpenAI model/prompt configuration, input guardrail, output-verifier unit, guarded booking
 agent/tool loop, mandatory booking slot collection, deterministic booking/output presentation,
-a static-fact-only semantic cache, and a single-page Streamlit login/chat UI with session-scoped
-conversation memory. The complete UI → guardrail → booking → verifier flow is wired.
+an implemented-and-tested but intentionally unwired static-fact semantic-cache seam (see
+[Caching](#caching)), and a single-page Streamlit login/chat UI with session-scoped conversation
+memory. The complete live UI → guardrail → booking → verifier flow is wired without that optional
+cache seam.
 
 ## Architecture
 
@@ -37,7 +39,7 @@ app/
 │   ├── conversation.py # Slot pre-validation + ID-free output formatting
 │   └── orchestrator.py # Guardrail + tool loop + verified-response policy
 ├── cache/
-│   └── semantic_cache.py # Static-fact-only in-memory semantic cache
+│   └── semantic_cache.py # Tested static-fact cache seam; intentionally unwired
 └── ui/
     ├── session.py      # Tested auth gate, history, turn, and logout helpers
     └── streamlit_app.py # Thin single-page login and chat rendering
@@ -58,7 +60,7 @@ app/
 | `agent/error_presentation.py` | Purely maps the Issue #4 `BookingError` types plus the attempted safe booking fields to fixed, actionable domain-language messages. It performs no I/O, LLM calls, or DB access and never echoes raw exception payloads. | Rule-error presentation belongs outside the domain vocabulary. The orchestrator calls it at its existing tool-error catch point, avoiding a second catch layer while keeping wording predictable and independently testable. |
 | `agent/conversation.py` | Purely performs conversational create pre-validation, aggregates missing fields while acknowledging supplied details, renders create/cancel confirmations from the `Booking` returned by the write tool, labels GMT-3 evidence, partitions schedule slots into available/occupied sections, and resolves cancellation descriptions against supplied owned bookings. An omitted date uses the injected default date and requires confirmation. It performs no SQL, auth, LLM calls, or repository access. | Rendering and clarification belong in deterministic presentation helpers. Inputs and tool invokers remain injected, making tool suppression, formatting, privacy, and ambiguity fully testable. |
 | `agent/orchestrator.py` | Coordinates the guardrail, deterministic system prompt, server-bound tool adapters, model → tool → model loop, and verifier. It adds authenticated list/cancel adapters, passes attempted tool arguments to deterministic error presentation, and binds the injected current date without changing the four underlying tool signatures. It owns no SQL, auth, booking rules, or conversation storage. | Per-message control flow and the bounded verifier-failure policy belong in the outer agent layer. The orchestrator depends on sibling agent services and tool/data adapters; those layers never depend back on it, so business behavior stays independently testable. |
-| `cache/semantic_cache.py` | Classifies only explicit static query categories, embeds eligible queries through an injected small/low-cost OpenAI embedder, and keeps answers in a process-local dictionary when cosine similarity exceeds a conservative threshold. It has no DB access or business logic. | The cache is an optional outer-layer optimization. Dependency injection prevents hidden API construction and makes similarity behavior deterministic in tests; ephemeral storage avoids coupling optimization data to booking persistence. |
+| `cache/semantic_cache.py` | Classifies only explicit static query categories, embeds eligible queries through an injected embedder, and keeps answers in a process-local dictionary when cosine similarity exceeds a conservative threshold. It has no DB access or business logic and is not imported or instantiated by the live application. | The designed-and-tested cache is an intentionally unwired outer-layer optimization seam. Dependency injection prevents hidden API construction and makes similarity behavior deterministic in tests; ephemeral storage avoids coupling optimization data to booking persistence. |
 | `ui/session.py` | Owns the testable server-side auth flag/username updates, LangChain message history mutations, auth-gate predicate, orchestrator-call assembly, and full logout reset. It imports no Streamlit and contains no booking rules, SQL, or model construction. | Session behavior is separated from rendering so security and multi-turn context can be unit-tested without a Streamlit runtime. It delegates authentication and message handling inward to the existing services. |
 | `ui/streamlit_app.py` | Renders one login/chat page, gets credentials and chat input, displays messages, obtains the configured LLM through `build_llm`, and injects the current GMT-3 datetime into the session helper. | Streamlit is the outermost delivery detail. It depends inward on UI helpers, auth/agent services, and LangChain message types; no module depends back on it. Its render-only glue is the justified coverage omission. |
 
@@ -201,13 +203,16 @@ History is intentionally unbounded within this small challenge session. Very lon
 increase prompt tokens and latency. A production deployment should cap context to the last N
 messages or summarize older turns; trimming/summarization is outside this scope.
 
-The implemented semantic cache defines a narrow pre-LLM optimization seam for a future
-composition step. Only an explicitly recognized static question such as room capacity or the
-fixed room list may consult it before `handle_message`; a hit can avoid the LLM call, while a miss
-continues into the flow above. Availability, schedules, bookings, free/occupied slots, and every
-unrecognized query must bypass the cache entirely, so it can never sit in front of tool execution
-for state-dependent questions. This UI issue does not construct the required embedding client or
-wire that optional optimization into the turn path.
+### Caching
+
+The implemented and tested `SemanticCache` is a narrow, intentionally unwired pre-LLM optimization
+seam for a possible future composition step. If wired, only an explicitly recognized static
+question such as room capacity or the fixed room list could consult it before `handle_message`; a
+hit would avoid the LLM call, while a miss would continue into the flow above. Availability,
+schedules, bookings, free/occupied slots, and every unrecognized query would bypass the cache
+entirely, so it could never sit in front of tool execution for state-dependent questions. The live
+application does not import or instantiate `SemanticCache`, construct an embedding client, or add
+a cache step to the turn path.
 
 OpenAI prompt caching is engaged with the stable model-level key
 `promtior-booking-agent-v1`, passed by `langchain-openai` as `prompt_cache_key`. OpenAI performs
@@ -218,10 +223,10 @@ appear at the end. The orchestrator binds tool definitions in a stable
 create/cancel/availability/schedule/my-bookings order, so eligible repeated
 system-prefix/tool-definition input can be reused; the username itself is closure state, not
 changing schema content. Prompt caching lowers
-the input cost of an eligible LLM call but still makes that call. The separate semantic cache can
-avoid the call entirely, but only for repeated allowlisted static questions; it is not a general
-prompt-response cache. The static dataset is just five rooms with fixed capacities, so the real
-token savings here are modest. The mechanism demonstrates semantic caching and establishes a
+the input cost of an eligible LLM call but still makes that call. If wired, the separate semantic
+cache could avoid the call entirely, but only for repeated allowlisted static questions; it is not
+a general prompt-response cache. The static dataset is just five rooms with fixed capacities, so
+the real token savings here are modest. The seam demonstrates semantic caching and establishes a
 safe pattern rather than addressing a major project cost driver. Prompt-cache usage remains
 observable through the API response's cached-token metadata.
 
@@ -297,10 +302,11 @@ committed.
 
 These are the only environment variables currently read by application code. The orchestrator
 passes the relative default `bookings.db` path directly to `data.db.connect`; it has no environment
-variable. `SemanticCache` reads no environment variables and constructs no client; the future
-composition layer supplies a small/low-cost OpenAI embedder configured with the existing API key,
-so this issue adds no configuration. Room capacities and the two challenge usernames/shared
-password are fixed in code. `.env.example` contains placeholders for both OpenAI variables, and
+variable. `SemanticCache` reads no environment variables and constructs no client; if the seam is
+wired later, the composition layer would supply a small/low-cost OpenAI embedder configured with
+the existing API key. The unwired seam adds no configuration. Room capacities and the two
+challenge usernames/shared password are fixed in code. `.env.example` contains placeholders for
+both OpenAI variables, and
 `.gitignore` explicitly excludes `.env`.
 
 Run the single-page application from the repository root:
@@ -569,18 +575,19 @@ Entries are grouped chronologically by the issue that introduced the implemented
   miss is safer than an ambitious classification or a wrong hit.
 - **Semantic matches must exceed a high similarity threshold.** The named `0.92` cosine threshold
   is deliberately conservative: equivalent phrasings can reuse an answer, while borderline or
-  distant queries miss and continue to the normal LLM/tool flow. The embedding provider is
-  injected rather than constructed by the cache, keeping provider configuration outside the
-  module and tests deterministic without live API calls.
+  distant queries return a miss. If wired later, the composition step would continue those misses
+  into the normal LLM/tool flow. The embedding provider is injected rather than constructed by the
+  cache, keeping provider configuration outside the module and tests deterministic without live
+  API calls.
 - **Cache entries live only in process memory.** They are not written to SQLite because cached
-  responses are disposable optimization artifacts, not application data. Process restarts may
-  discard them without affecting booking correctness, and persistence would add coupling with no
-  benefit at this scale.
+  responses would be disposable optimization artifacts, not application data. If wired, process
+  restarts could discard them without affecting booking correctness, and persistence would add
+  coupling with no benefit at this scale.
 - **The expected savings are intentionally modest.** There are only five rooms and a small set of
-  fixed facts. This feature demonstrates the technique and establishes a safe default-bypass
-  caching pattern; it is not presented as a major token-cost reduction for this project. It
+  fixed facts. This unwired seam demonstrates the technique and establishes a safe default-bypass
+  caching pattern; it is not presented as a live feature or major token-cost reduction. It
   complements prompt caching: prompt caching reduces repeated system-prompt/tool-definition input
-  cost, whereas a semantic-cache hit avoids the LLM call altogether.
+  cost, whereas a semantic-cache hit would avoid the LLM call altogether if wired.
 
 ### Issue #13 — Thin Streamlit UI and session memory
 
@@ -791,3 +798,11 @@ Entries are grouped chronologically by the issue that introduced the implemented
   and booking facts still require tool output, so adding an unsupported capacity, availability,
   or booking claim remains a verifier rejection. The fixed guardrail refusal continues to return
   before the booking agent and verifier by design and contains no mutable-state assertion.
+
+### Review A3 — Unexpected turn failures
+
+- **Unexpected failures complete the turn safely.** `run_turn` logs the real exception server-side and appends a generic assistant reply, preserving alternating history without exposing technical details; `BookingError` keeps its existing deterministic presentation path.
+
+### Review A4 — Semantic cache wiring
+
+- **The designed-and-tested semantic-cache seam remains intentionally unwired.** The optimization is not needed at this scale, and wiring it would add an embeddings-client dependency for no measured gain.

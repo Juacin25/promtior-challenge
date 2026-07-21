@@ -1,5 +1,6 @@
 """Testable session-state helpers for the thin Streamlit UI."""
 
+import logging
 from collections.abc import Callable, MutableMapping
 from datetime import datetime
 from typing import Any
@@ -8,9 +9,12 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from app.agent.orchestrator import handle_message
 from app.auth.auth import AuthError, authenticate
+from app.domain.exceptions import BookingError
 from app.domain.models import User
 
 AUTH_ERROR_MESSAGE = "Invalid username or password."
+TURN_FAILURE_MESSAGE = "I couldn't complete that request. Please try again."
+logger = logging.getLogger(__name__)
 
 
 def initialize_session(state: MutableMapping[str, Any]) -> None:
@@ -59,13 +63,19 @@ def run_turn(
     initialize_session(state)
     prior_history = list(state["history"])
     append_user_message(state, user_message)
-    reply = handler(
-        user_message=user_message,
-        history=prior_history,
-        username=state["username"],
-        current_dt=current_dt,
-        llm=llm,
-    )
+    try:
+        reply = handler(
+            user_message=user_message,
+            history=prior_history,
+            username=state["username"],
+            current_dt=current_dt,
+            llm=llm,
+        )
+    except BookingError:
+        raise
+    except Exception:
+        logger.exception("Unexpected failure while handling chat turn")
+        reply = TURN_FAILURE_MESSAGE
     append_assistant_message(state, reply)
     return reply
 

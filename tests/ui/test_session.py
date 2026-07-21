@@ -6,6 +6,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.auth.auth import AuthError
+from app.domain.exceptions import TitleRequiredError
 from app.ui.session import (
     AUTH_ERROR_MESSAGE,
     append_assistant_message,
@@ -142,3 +143,39 @@ def test_multi_turn_history_accumulates_and_prior_context_is_passed():
         HumanMessage(content="Follow-up question"),
         AIMessage(content="Second reply"),
     ]
+
+
+def test_unexpected_turn_failure_returns_fallback_and_completes_history(caplog):
+    current_dt = datetime(2026, 7, 20, 10, tzinfo=timezone(timedelta(hours=-3)))
+    handler = Mock(side_effect=RuntimeError("private API failure detail"))
+    state = {
+        "authenticated": True,
+        "username": "User1",
+        "history": [
+            HumanMessage(content="Earlier question"),
+            AIMessage(content="Earlier reply"),
+        ],
+    }
+
+    reply = run_turn(state, "Try this request", current_dt, object(), handler)
+
+    assert reply == "I couldn't complete that request. Please try again."
+    assert state["history"] == [
+        HumanMessage(content="Earlier question"),
+        AIMessage(content="Earlier reply"),
+        HumanMessage(content="Try this request"),
+        AIMessage(content="I couldn't complete that request. Please try again."),
+    ]
+    assert "RuntimeError" in caplog.text
+    assert "private API failure detail" in caplog.text
+
+
+def test_run_turn_does_not_catch_booking_error():
+    current_dt = datetime(2026, 7, 20, 10, tzinfo=timezone(timedelta(hours=-3)))
+    error = TitleRequiredError("raw internal payload")
+    state = {"authenticated": True, "username": "User1", "history": []}
+
+    with pytest.raises(TitleRequiredError) as raised:
+        run_turn(state, "Book room C", current_dt, object(), Mock(side_effect=error))
+
+    assert raised.value is error
