@@ -1,5 +1,6 @@
 """Coordinate one guarded booking-agent turn; contain no booking rules."""
 
+import os
 from datetime import datetime
 from pathlib import Path
 from sqlite3 import Connection
@@ -25,6 +26,10 @@ from app.tools.booking_tools import build_booking_tools
 BOOKINGS_DB_PATH = Path("bookings.db")
 SAFE_FALLBACK = "I couldn't produce a reliable answer. Please try again."
 MAX_AGENT_STEPS = 8
+
+
+def _bookings_db_path() -> Path:
+    return Path(os.getenv("BOOKINGS_DB_PATH", str(BOOKINGS_DB_PATH)))
 
 
 def _bind_username(
@@ -122,7 +127,7 @@ def _bind_username(
 def _build_bound_tools(
     username: str, default_date: str | None = None
 ) -> tuple[list[BaseTool], Connection]:
-    connection = connect(BOOKINGS_DB_PATH)
+    connection = connect(_bookings_db_path())
     repository = BookingRepository(connection)
     tools = build_booking_tools(repository)
     return (

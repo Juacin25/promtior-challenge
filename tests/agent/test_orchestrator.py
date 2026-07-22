@@ -1,5 +1,6 @@
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -52,6 +53,18 @@ def verifier_mock(monkeypatch):
     verifier = Mock(return_value=VerifierResult(is_grounded=True, reason=""))
     monkeypatch.setattr(orchestrator, "verify_response", verifier)
     return verifier
+
+
+def test_database_path_defaults_to_existing_relative_path(monkeypatch):
+    monkeypatch.delenv("BOOKINGS_DB_PATH", raising=False)
+
+    assert orchestrator._bookings_db_path() == Path("bookings.db")
+
+
+def test_database_path_uses_environment_override(monkeypatch):
+    monkeypatch.setenv("BOOKINGS_DB_PATH", "/data/bookings.db")
+
+    assert orchestrator._bookings_db_path() == Path("/data/bookings.db")
 
 
 def test_safe_message_runs_tool_loop_and_returns_grounded_answer(

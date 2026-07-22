@@ -2,3 +2,6 @@
 __pycache__/
 *.pyc
 .coverage
+bookings.db
+*.log
+*.egg-info/

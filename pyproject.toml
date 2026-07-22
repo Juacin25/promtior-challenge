@@ -44,6 +44,7 @@ exclude_lines = [
 
 [tool.ruff]
 line-length = 100
+extend-exclude = ["doc"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "B"]

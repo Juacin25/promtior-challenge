@@ -167,6 +167,15 @@ generic reply, login failure does not say whether the username or the password w
 occupied-room message never names who holds the conflicting booking. What a user cannot do, they
 also cannot enumerate.
 
+## Deployment
+
+The app is prepared for Railway's native Python builder with a versioned Streamlit start command
+and a Python 3.11 runtime pin. SQLite is durable there only when a Railway volume is mounted and
+the database path points inside it; otherwise every restart erases every booking. The resulting
+site is still a public challenge instance with brief-fixed credentials and three billed OpenAI
+calls in a normal safe turn. The README's [Deployment section](../README.md#deployment) gives the
+fresh-project steps, required variables, volume wiring, and restart verification.
+
 ## Honest limitations
 
 - The semantic cache in `app/cache` is implemented and tested but not wired into the turn path:
