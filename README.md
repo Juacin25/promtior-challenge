@@ -324,14 +324,23 @@ start command so the service always binds Railway's injected port, listens on ev
 and runs headless:
 
 ```bash
-streamlit run app/ui/streamlit_app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
+python -m streamlit run app/ui/streamlit_app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
 ```
 
 This mechanism was chosen over a dashboard-only command or `Procfile` because Railway reads
 `railway.toml` directly and the reviewed start command stays versioned with the application.
-Railway's native Railpack builder detects the existing `pyproject.toml`, installs its declared
-dependencies, and expands `$PORT` in the shell-run start command. `.python-version` pins Railway
-to Python 3.11, matching CI. A Dockerfile is unnecessary.
+Railway's native Railpack builder detects Python from `.python-version`, installs the pinned
+runtime dependencies from the root `requirements.txt`, and expands `$PORT` in the shell-run start
+command. `python -m streamlit` keeps the repository root on Python's import path, so the app's
+absolute `app.*` imports work without installing the project package. `.python-version` pins
+Railway to Python 3.11, matching CI. A Dockerfile is unnecessary.
+
+`pyproject.toml` remains the project's authoritative dependency declaration for local development
+and CI. The root `requirements.txt` exists only because Railpack did not install dependencies from
+that declaration in the observed build. It mirrors the runtime dependency names from
+`pyproject.toml`, with versions pinned from the validated local environment; when a runtime
+dependency changes in `pyproject.toml`, update its corresponding pin in `requirements.txt` in the
+same change. Development-only packages remain in the `dev` extra and are not shipped to Railway.
 
 > [!WARNING]
 > A Railway volume is mandatory for booking persistence. Mount it at `/data` and set
@@ -348,7 +357,8 @@ to Python 3.11, matching CI. A Dockerfile is unnecessary.
 ### Deploy from a fresh Railway project
 
 1. In Railway, choose **New Project**, select **Deploy from GitHub repo**, authorize access if
-   prompted, and select this repository. Railpack detects it as Python from `pyproject.toml`.
+   prompted, and select this repository. Railpack detects Python from `.python-version` and
+   installs the root `requirements.txt`.
 2. Open the new service's **Variables** tab and add `OPENAI_API_KEY`. Optionally set
    `OPENAI_MODEL`; otherwise the app uses `gpt-4o-mini`. Do not set `PORT` because Railway injects
    it at runtime.
@@ -722,8 +732,11 @@ Entries are grouped chronologically by the issue that introduced the implemented
   local behavior backward-compatible. No environment access enters the pure domain layer and no
   path parameter is threaded through unrelated layers.
 - **Railway uses native Railpack plus config as code, not a Dockerfile.** `railway.toml` versions
-  the Streamlit start command and `.python-version` selects Python 3.11 to match CI. The existing
-  `pyproject.toml` is sufficient for Python detection and dependency installation.
+  the Streamlit start command and `.python-version` selects Python 3.11 to match CI. A pinned root
+  `requirements.txt` triggers dependency installation after the observed Railpack build skipped
+  the authoritative `pyproject.toml` declaration; it contains runtime packages only. Starting
+  Streamlit through `python -m` makes the repository root importable without installing the
+  project package.
 - **Persistent deployment requires an explicit volume contract.** The volume is mounted at
   `/data` and `BOOKINGS_DB_PATH` points to `/data/bookings.db`; either setting without the other
   leaves bookings on ephemeral storage. The default database, logs, and generated egg-info are
