@@ -301,21 +301,76 @@ committed.
 | --- | --- | --- |
 | `OPENAI_API_KEY` | Yes | OpenAI credential loaded with `python-dotenv`; never logged or hardcoded. |
 | `OPENAI_MODEL` | No | Chat model name. Defaults to `gpt-4o-mini`, a cost-effective model with tool-calling support. |
+| `BOOKINGS_DB_PATH` | No locally; yes for Railway persistence | SQLite file path. Defaults to the existing relative `bookings.db`; set it to `/data/bookings.db` when the Railway volume is mounted at `/data`. |
+| `PORT` | Railway only; injected | Port used by the Railway start command. Railway supplies it automatically; do not add it manually. |
 
-These are the only environment variables currently read by application code. The orchestrator
-passes the relative default `bookings.db` path directly to `data.db.connect`; it has no environment
-variable. `SemanticCache` reads no environment variables and constructs no client; if the seam is
-wired later, the composition layer would supply a small/low-cost OpenAI embedder configured with
-the existing API key. The unwired seam adds no configuration. Room capacities and the two
-challenge usernames/shared password are fixed in code. `.env.example` contains placeholders for
-both OpenAI variables, and
-`.gitignore` explicitly excludes `.env`.
+Application code reads the first three variables; `PORT` is consumed by the version-controlled
+Railway start command. `SemanticCache` reads no environment variables and constructs no client;
+if the seam is wired later, the composition layer would supply a small/low-cost OpenAI embedder
+configured with the existing API key. The unwired seam adds no configuration. Room capacities and
+the two challenge usernames/shared password are fixed in code. `.env.example` contains safe local
+placeholders for the three user-supplied variables, and `.gitignore` excludes `.env`.
 
 Run the single-page application from the repository root:
 
 ```bash
 streamlit run app/ui/streamlit_app.py
 ```
+
+## Deployment
+
+Railway uses the repository-root `railway.toml` as config as code. It holds the exact Streamlit
+start command so the service always binds Railway's injected port, listens on every interface,
+and runs headless:
+
+```bash
+streamlit run app/ui/streamlit_app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
+```
+
+This mechanism was chosen over a dashboard-only command or `Procfile` because Railway reads
+`railway.toml` directly and the reviewed start command stays versioned with the application.
+Railway's native Railpack builder detects the existing `pyproject.toml`, installs its declared
+dependencies, and expands `$PORT` in the shell-run start command. `.python-version` pins Railway
+to Python 3.11, matching CI. A Dockerfile is unnecessary.
+
+> [!WARNING]
+> A Railway volume is mandatory for booking persistence. Mount it at `/data` and set
+> `BOOKINGS_DB_PATH=/data/bookings.db`. Without both settings, SQLite writes to the ephemeral
+> container filesystem and the booking database is wiped on every service restart or redeploy.
+
+### Prerequisites
+
+- A Railway account and a fresh Railway project.
+- This repository pushed to a GitHub repository Railway can access.
+- An OpenAI API key with billing enabled. Add it only in Railway's Variables dashboard; never put
+  it in Git, `railway.toml`, or any committed `.env` file.
+
+### Deploy from a fresh Railway project
+
+1. In Railway, choose **New Project**, select **Deploy from GitHub repo**, authorize access if
+   prompted, and select this repository. Railpack detects it as Python from `pyproject.toml`.
+2. Open the new service's **Variables** tab and add `OPENAI_API_KEY`. Optionally set
+   `OPENAI_MODEL`; otherwise the app uses `gpt-4o-mini`. Do not set `PORT` because Railway injects
+   it at runtime.
+3. Add a volume to this same service and environment, set its mount path to `/data`, then add
+   `BOOKINGS_DB_PATH=/data/bookings.db` in **Variables**. These two settings must agree.
+4. Deploy or redeploy the service. `railway.toml` supplies the Streamlit start command; no build
+   or start command needs to be copied into the dashboard.
+5. In the service's **Settings**, generate a public domain under **Networking**, then open that
+   URL after the deployment reports success.
+
+### Verify persistence
+
+1. Open the public URL and sign in as `User1` with password `TechnicalChallengePromtior`.
+2. Create a uniquely titled future booking and list your bookings to confirm it exists.
+3. Restart the Railway service.
+4. Sign in again and list your bookings. The same booking must still exist; this restart check is
+   what proves `/data` and `BOOKINGS_DB_PATH` are wired correctly.
+
+This remains a public challenge/demo instance, not private production access control. The
+credentials are fixed by the brief, so anyone who has the deployment URL and those credentials
+can use the app. A normal safe turn makes three OpenAI calls—guardrail, booking agent, and output
+verifier—and each call is billed to the configured API key; additional tool rounds can add calls.
 
 ## Development tooling
 
@@ -325,7 +380,8 @@ offline, repository-relative `.claude/hooks/checks.py` runner:
 - **After `Edit` or `Write`:** Python files under `app/` or `tests/` trigger
   `python -m ruff check .`. Other paths and non-Python files return immediately, keeping the edit
   loop fast. A failure starts with `LINT CHECK FAILED`, shows the command, and includes the Ruff
-  code, file/line excerpt, and suggested correction.
+  code, file/line excerpt, and suggested correction. Ruff excludes `doc/`, whose executable
+  notebook is documentation rather than application or test code.
 - **Before Claude Code runs `git commit`:** the hook runs `python -m pytest --cov`. The options in
   `pyproject.toml` automatically enable branch coverage and the 100% gate. Failing tests are
   labelled `TEST CHECK FAILED`; a suite that passes but misses the threshold is labelled
@@ -658,6 +714,22 @@ Entries are grouped chronologically by the issue that introduced the implemented
   observable reply, and any tool that must remain uncalled. Output is an intentionally failing
   test skeleton with no live API path. Keeping production logic out of the generator preserves
   the red-first TDD boundary and prevents boilerplate from guessing behavior requirements.
+
+### Issue #17 — Railway deployment
+
+- **The SQLite path is resolved once at the orchestrator composition boundary.**
+  `BOOKINGS_DB_PATH` overrides the file location while the relative `bookings.db` default keeps
+  local behavior backward-compatible. No environment access enters the pure domain layer and no
+  path parameter is threaded through unrelated layers.
+- **Railway uses native Railpack plus config as code, not a Dockerfile.** `railway.toml` versions
+  the Streamlit start command and `.python-version` selects Python 3.11 to match CI. The existing
+  `pyproject.toml` is sufficient for Python detection and dependency installation.
+- **Persistent deployment requires an explicit volume contract.** The volume is mounted at
+  `/data` and `BOOKINGS_DB_PATH` points to `/data/bookings.db`; either setting without the other
+  leaves bookings on ephemeral storage. The default database, logs, and generated egg-info are
+  ignored so runtime data and build artifacts cannot be committed accidentally.
+- **Ruff excludes `doc/`.** CI still lints the application and tests through `ruff check .`, while
+  the executable documentation notebook is outside that gate.
 
 ### Issue #18 — Conversation flow and output formats
 
