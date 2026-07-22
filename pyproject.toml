@@ -5,7 +5,9 @@ description = "Conversational meeting-room booking chatbot"
 requires-python = ">=3.11"
 dependencies = [
     "langchain",
+    "langchain-core",
     "langchain-openai",
+    "python-dotenv",
     "streamlit",
     "bcrypt",
 ]
@@ -24,13 +26,25 @@ addopts = "--cov=app --cov-branch --cov-report=term-missing"
 [tool.coverage.run]
 source = ["app"]
 branch = true
+omit = [
+    # Streamlit entrypoint: pure UI glue (login form + chat widget wiring),
+    # no business logic — kept logic-free by design so it needs no tests.
+    "app/ui/streamlit_app.py",
+]
 
 [tool.coverage.report]
 show_missing = true
-exclude_lines = ["pragma: no cover"]
+# Single source of the coverage gate; CI runs plain `pytest` and inherits it.
+fail_under = 100
+exclude_lines = [
+    # Standard marker for the rare line that is genuinely untestable
+    # (e.g. `if __name__ == "__main__":` entry guards).
+    "pragma: no cover",
+]
 
 [tool.ruff]
 line-length = 100
+extend-exclude = ["doc"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "B"]

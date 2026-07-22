@@ -1,0 +1,309 @@
+<mxfile host="app.diagrams.net" agent="claude-code" version="24.7.7">
+  <diagram id="turn-flow" name="Components and one-turn flow">
+    <mxGraphModel dx="1660" dy="1170" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1660" pageHeight="1170" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="title" value="Meeting-room booking chatbot — components and one-turn flow" style="text;html=1;fontSize=20;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="140" y="15" width="800" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitle" value="Every internal node maps to a module in app/; the User and the OpenAI API are external. Numbered arrows trace one chat turn." style="text;html=1;fontSize=11;align=center;verticalAlign=middle;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="140" y="45" width="800" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- User actor -->
+        <mxCell id="nUser" value="User&lt;br&gt;(User1 / User2)" style="shape=actor;whiteSpace=wrap;html=1;verticalLabelPosition=bottom;verticalAlign=top;fillColor=#ffffff;strokeColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="90" y="30" width="70" height="75" as="geometry" />
+        </mxCell>
+
+        <!-- ============ UI layer ============ -->
+        <mxCell id="layerUI" value="UI layer — app/ui (Streamlit)" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;align=right;spacingRight=8;fontStyle=1;fontSize=13;container=1;collapsible=0;fillColor=#eaf3ea;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="40" y="130" width="1000" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="nST" value="&lt;b&gt;Streamlit page&lt;/b&gt;&lt;br&gt;streamlit_app.py&lt;br&gt;login + chat render&lt;br&gt;sole clock read: now(GMT-3)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="layerUI">
+          <mxGeometry x="30" y="50" width="300" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="nSess" value="&lt;b&gt;Session state&lt;/b&gt;&lt;br&gt;session.py · run_turn()&lt;br&gt;history: Human/AI messages&lt;br&gt;username bound at login" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="layerUI">
+          <mxGeometry x="390" y="50" width="320" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="nAuth" value="&lt;b&gt;auth.py — bcrypt login&lt;/b&gt;&lt;br&gt;User1/User2 · generic failure&lt;br&gt;login-time only (not in turn)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;dashed=1;fontSize=11;fontColor=#555555;" vertex="1" parent="layerUI">
+          <mxGeometry x="760" y="50" width="210" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- ============ Agent layer ============ -->
+        <mxCell id="layerAgent" value="Agent layer — app/agent" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;align=left;spacingLeft=110;fontStyle=1;fontSize=13;container=1;collapsible=0;fillColor=#eef3fb;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="40" y="350" width="1000" height="380" as="geometry" />
+        </mxCell>
+        <mxCell id="nGuard" value="&lt;b&gt;Guardrail&lt;/b&gt;&lt;br&gt;guardrail.py · check_message()&lt;br&gt;SAFE / UNSAFE classifier" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="layerAgent">
+          <mxGeometry x="30" y="40" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="nOrch" value="&lt;b&gt;Orchestrator&lt;/b&gt;&lt;br&gt;orchestrator.py · handle_message()&lt;br&gt;coordinates the turn&lt;br&gt;owns SAFE_FALLBACK · no rules" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="layerAgent">
+          <mxGeometry x="330" y="40" width="340" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="nVerif" value="&lt;b&gt;Output verifier&lt;/b&gt;&lt;br&gt;verifier.py · verify_response()&lt;br&gt;draft grounded in evidence?" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="layerAgent">
+          <mxGeometry x="730" y="40" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="nPrompt" value="&lt;b&gt;Prompt builder&lt;/b&gt;&lt;br&gt;llm.py · build_system_prompt()&lt;br&gt;static prefix first; GMT-3&lt;br&gt;anchors + username last" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="layerAgent">
+          <mxGeometry x="30" y="180" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="nLoop" value="&lt;b&gt;Booking agent loop&lt;/b&gt;&lt;br&gt;_run_booking_agent()&lt;br&gt;model ⇄ tools · ≤ 8 model steps&lt;br&gt;deterministic corrections exit early" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="layerAgent">
+          <mxGeometry x="330" y="180" width="340" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="nErrp" value="&lt;b&gt;Error presentation&lt;/b&gt;&lt;br&gt;error_presentation.py&lt;br&gt;BookingError → fixed message&lt;br&gt;no raw payloads · no IDs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="layerAgent">
+          <mxGeometry x="730" y="180" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="nConv" value="&lt;b&gt;Conversation adapters&lt;/b&gt; — conversation.py&lt;br&gt;bound tools: create · cancel · schedule · my-bookings&lt;br&gt;pre-validation · slot-filling · deterministic confirmations · cancel-by-description&lt;br&gt;username injected server-side — no user / booking_id in schemas&lt;br&gt;cancel + my-bookings read owned bookings via repo closure (find_by_user)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10.5;" vertex="1" parent="layerAgent">
+          <mxGeometry x="240" y="295" width="460" height="75" as="geometry" />
+        </mxCell>
+
+        <!-- ============ Tools layer ============ -->
+        <mxCell id="layerTools" value="Tools layer — app/tools (LangChain adapters)" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;align=left;spacingLeft=8;fontStyle=1;fontSize=13;container=1;collapsible=0;fillColor=#fdf8e8;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="40" y="780" width="1000" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="nTools" value="&lt;b&gt;Booking tools&lt;/b&gt; — booking_tools.py&lt;br&gt;create_booking · cancel_booking · list_available_rooms · get_room_schedule&lt;br&gt;parse GMT-3 ISO args · delegate to rules + repository · cancel: not-found ≡ not-owner (same reply)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="layerTools">
+          <mxGeometry x="180" y="35" width="640" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- ============ Domain layer ============ -->
+        <mxCell id="layerDomain" value="Domain layer — app/domain (pure · stdlib only)" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;align=left;spacingLeft=8;fontStyle=1;fontSize=13;container=1;collapsible=0;fillColor=#f3eef7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="40" y="940" width="620" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="nRules" value="&lt;b&gt;rules.py&lt;/b&gt;&lt;br&gt;30-min slots · ≤ 3 h&lt;br&gt;capacity · title · overlap" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="layerDomain">
+          <mxGeometry x="20" y="45" width="240" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="nExc" value="&lt;b&gt;exceptions.py&lt;/b&gt;&lt;br&gt;BookingError family&lt;br&gt;(typed, one per rule)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="layerDomain">
+          <mxGeometry x="290" y="45" width="190" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="nModels" value="&lt;b&gt;models.py&lt;/b&gt;&lt;br&gt;frozen&lt;br&gt;entities" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="layerDomain">
+          <mxGeometry x="500" y="45" width="100" height="85" as="geometry" />
+        </mxCell>
+
+        <!-- ============ Data layer ============ -->
+        <mxCell id="layerData" value="Data layer — app/data · all SQL lives here (db.py schema + seed · repository.py queries) · connection is per-turn" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;align=left;spacingLeft=8;fontStyle=1;fontSize=13;container=1;collapsible=0;fillColor=#f2f2f2;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="690" y="940" width="350" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="nRepo" value="&lt;b&gt;repository.py&lt;/b&gt;&lt;br&gt;parameterized CRUD&lt;br&gt;GMT-3 on save + load" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontSize=11;" vertex="1" parent="layerData">
+          <mxGeometry x="20" y="45" width="190" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="nDb" value="bookings.db" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=12;fillColor=#e6e6e6;strokeColor=#666666;fontSize=11;" vertex="1" parent="layerData">
+          <mxGeometry x="245" y="40" width="85" height="90" as="geometry" />
+        </mxCell>
+
+        <!-- ============ External: OpenAI ============ -->
+        <mxCell id="nOai" value="&lt;b&gt;OpenAI API&lt;/b&gt; (external)&lt;br&gt;ChatOpenAI — llm.py · build_llm()&lt;br&gt;default gpt-4o-mini · temperature 0&lt;br&gt;prompt_cache_key · one shared client&lt;br&gt;per turn: 1 blocked · 3 min safe&lt;br&gt;+1 per extra tool round" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffcc80;strokeColor=#e65100;strokeWidth=2;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="420" width="300" height="150" as="geometry" />
+        </mxCell>
+
+        <!-- ============ Unwired cache ============ -->
+        <mxCell id="boxCache" value="Present but NOT wired into the turn path" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;align=left;spacingLeft=8;fontStyle=1;fontSize=12;container=1;collapsible=0;fillColor=#fafafa;strokeColor=#999999;dashed=1;fontColor=#555555;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="770" width="300" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="nCache" value="&lt;b&gt;semantic_cache.py&lt;/b&gt;&lt;br&gt;static-fact cache (allowlist + cosine ≥ 0.92)&lt;br&gt;implemented + tested — no caller in app/" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;dashed=1;fontSize=11;fontColor=#555555;" vertex="1" parent="boxCache">
+          <mxGeometry x="15" y="35" width="270" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- ============ Legend ============ -->
+        <mxCell id="legend" value="Legend" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;align=left;spacingLeft=8;fontStyle=1;fontSize=13;container=1;collapsible=0;fillColor=#ffffff;strokeColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="920" width="500" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="lg1line" value="" style="line;strokeWidth=2;html=1;strokeColor=#333333;" vertex="1" parent="legend">
+          <mxGeometry x="15" y="32" width="40" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="lg1txt" value="solid arrow — in-process call / data (double-headed = call ⇄ result)" style="text;html=1;fontSize=11;align=left;verticalAlign=middle;" vertex="1" parent="legend">
+          <mxGeometry x="65" y="26" width="430" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="lg2line" value="" style="line;strokeWidth=3;html=1;strokeColor=#e65100;dashed=1;" vertex="1" parent="legend">
+          <mxGeometry x="15" y="56" width="40" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="lg2txt" value="orange dashed, double-headed, ① ② ③ — LLM calls to OpenAI (guardrail · agent loop · verifier)" style="text;html=1;fontSize=11;align=left;verticalAlign=middle;" vertex="1" parent="legend">
+          <mxGeometry x="65" y="46" width="430" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="lg3line" value="" style="line;strokeWidth=2;html=1;strokeColor=#cc0000;" vertex="1" parent="legend">
+          <mxGeometry x="15" y="86" width="40" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="lg3txt" value="red — stop paths: refusal · error translation · SAFE_FALLBACK" style="text;html=1;fontSize=11;align=left;verticalAlign=middle;" vertex="1" parent="legend">
+          <mxGeometry x="65" y="80" width="430" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="lg4txt" value="rounded box = module · dashed gray = not in the turn path / login-time · cylinder = SQLite file" style="text;html=1;fontSize=11;align=left;verticalAlign=middle;" vertex="1" parent="legend">
+          <mxGeometry x="15" y="104" width="470" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="lg5txt" value="bands = architecture layers; calls point inward: UI → agent → tools → domain · data" style="text;html=1;fontSize=11;align=left;verticalAlign=middle;" vertex="1" parent="legend">
+          <mxGeometry x="15" y="132" width="470" height="26" as="geometry" />
+        </mxCell>
+
+        <!-- ============ Edges: main path ============ -->
+        <mxCell id="e1" value="1 · user message" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#333333;endArrow=classic;endFill=1;exitX=0.7;exitY=1;entryX=0.25;entryY=0;" edge="1" parent="1" source="nUser" target="nST">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e16" value="16 · answer" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#333333;endArrow=classic;endFill=1;exitX=0.08;exitY=0;entryX=0.2;entryY=1;" edge="1" parent="1" source="nST" target="nUser">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="2 · run_turn(msg, now GMT-3)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#333333;endArrow=classic;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="nST" target="nSess">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eReply" value="reply" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#333333;endArrow=classic;endFill=1;exitX=0;exitY=0.8;entryX=1;entryY=0.8;" edge="1" parent="1" source="nSess" target="nST">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="3 · handle_message(msg, history, username, current_dt)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#333333;endArrow=classic;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="nSess" target="nOrch">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="590" y="342" />
+              <mxPoint x="540" y="342" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e15" value="15 · grounded answer | SAFE_FALLBACK" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#333333;endArrow=classic;endFill=1;exitX=0.24;exitY=0;entryX=0.28;entryY=1;" edge="1" parent="1" source="nOrch" target="nSess">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="451" y="312" />
+              <mxPoint x="520" y="312" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e4" value="4 · message" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#333333;endArrow=classic;endFill=1;exitX=0;exitY=0.33;entryX=1;entryY=0.33;" edge="1" parent="1" source="nOrch" target="nGuard">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4r" value="SAFE → continue" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#333333;endArrow=classic;endFill=1;exitX=1;exitY=0.72;entryX=0;entryY=0.72;" edge="1" parent="1" source="nGuard" target="nOrch">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value="5 · build system prompt" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#333333;endArrow=classic;endFill=1;exitX=0.1;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="nOrch" target="nPrompt">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="404" y="505" />
+              <mxPoint x="190" y="505" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e6" value="6 · prompt + history + message" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#333333;endArrow=classic;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="nOrch" target="nLoop">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="-90" y="-14" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e13" value="13 · draft + tool_outputs" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#333333;endArrow=classic;endFill=1;exitX=0.62;exitY=0;entryX=0.62;entryY=1;" edge="1" parent="1" source="nLoop" target="nOrch">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="85" y="18" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e7" value="7 · tool call (args)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#333333;endArrow=classic;endFill=1;exitX=0.28;exitY=1;entryX=0.4;entryY=0;" edge="1" parent="1" source="nLoop" target="nConv">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" value="12 · ToolMessage (IDs stripped)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#333333;endArrow=classic;endFill=1;exitX=0.6;exitY=0;entryX=0.55;entryY=1;" edge="1" parent="1" source="nConv" target="nLoop">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" value="8 · args + server-bound username" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#333333;endArrow=classic;endFill=1;exitX=0.45;exitY=1;entryX=0.42;entryY=0;" edge="1" parent="1" source="nConv" target="nTools">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" value="11 · Booking | message string" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#333333;endArrow=classic;endFill=1;exitX=0.56;exitY=0;entryX=0.645;entryY=1;" edge="1" parent="1" source="nTools" target="nConv">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="0" y="-24" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eRaw" value="7-alt · list_available_rooms raw call ⇄ rooms string" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#333333;startArrow=classic;startFill=1;endArrow=classic;endFill=1;exitX=0.97;exitY=1;entryX=0.836;entryY=0;" edge="1" parent="1" source="nLoop" target="nTools">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="8" y="55" as="offset" />
+            <Array as="points">
+              <mxPoint x="700" y="630" />
+              <mxPoint x="755" y="630" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e9" value="9 · check_* (five rules)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#333333;endArrow=classic;endFill=1;exitX=0.09;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="nTools" target="nRules">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="278" y="945" />
+              <mxPoint x="180" y="945" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eRaise" value="raise" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#333333;endArrow=classic;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="nRules" target="nExc">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" value="10 · save | find_by_* | delete" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#333333;endArrow=classic;endFill=1;exitX=0.9;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="nTools" target="nRepo">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="796" y="945" />
+              <mxPoint x="805" y="945" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eSql" value="SQL (parameterized)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#333333;endArrow=classic;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="nRepo" target="nDb">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e14" value="14 · draft + evidence + user msg + dates" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#333333;endArrow=classic;endFill=1;exitX=1;exitY=0.33;entryX=0;entryY=0.33;" edge="1" parent="1" source="nOrch" target="nVerif">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e14r" value="verdict" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#333333;endArrow=classic;endFill=1;exitX=0;exitY=0.72;entryX=1;entryY=0.72;" edge="1" parent="1" source="nVerif" target="nOrch">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eAuth" value="login: bind username" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#999999;dashed=1;endArrow=classic;endFill=1;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="nAuth" target="nSess">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ============ Edges: LLM calls ============ -->
+        <mxCell id="eL1" value="① message → SAFE / UNSAFE" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#e65100;strokeWidth=3;dashed=1;startArrow=classic;startFill=1;endArrow=classic;endFill=1;exitX=0.6;exitY=0;entryX=0.4;entryY=0;" edge="1" parent="1" source="nGuard" target="nOai">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="214" y="381" />
+              <mxPoint x="1240" y="381" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eL2" value="② messages + tool schemas → draft | tool calls (1 + one per tool round)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#e65100;strokeWidth=3;dashed=1;startArrow=classic;startFill=1;endArrow=classic;endFill=1;exitX=0.85;exitY=1;entryX=0;entryY=0.67;" edge="1" parent="1" source="nLoop" target="nOai">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="659" y="637" />
+              <mxPoint x="1060" y="637" />
+              <mxPoint x="1060" y="520" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eL3" value="③ grounded?" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#e65100;strokeWidth=3;dashed=1;startArrow=classic;startFill=1;endArrow=classic;endFill=1;exitX=1;exitY=0.3;entryX=0;entryY=0.2;" edge="1" parent="1" source="nVerif" target="nOai">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1060" y="417" />
+              <mxPoint x="1060" y="450" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ============ Edges: stop paths ============ -->
+        <mxCell id="fr1" value="UNSAFE → fixed refusal (no tools · no verifier)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#cc0000;strokeWidth=2;endArrow=classic;endFill=1;exitX=0.2;exitY=0;entryX=0.125;entryY=1;" edge="1" parent="1" source="nGuard" target="nSess">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="118" y="305" />
+              <mxPoint x="470" y="305" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="fr3" value="rejected → SAFE_FALLBACK (reason logged server-side)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#cc0000;strokeWidth=2;endArrow=classic;endFill=1;exitX=0.5;exitY=0;entryX=0.95;entryY=1;" edge="1" parent="1" source="nVerif" target="nSess">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="890" y="320" />
+              <mxPoint x="734" y="320" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="fr2a" value="BookingError (caught at loop)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#cc0000;strokeWidth=2;endArrow=classic;endFill=1;exitX=0.5;exitY=1;entryX=1;entryY=0.5;" edge="1" parent="1" source="nExc" target="nErrp">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="425" y="1082" />
+              <mxPoint x="1072" y="1082" />
+              <mxPoint x="1072" y="575" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="fr2b" value="deterministic message = draft (still verified)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;labelBackgroundColor=#ffffff;strokeColor=#cc0000;strokeWidth=2;endArrow=classic;endFill=1;exitX=0.5;exitY=0;entryX=0.9;entryY=1;" edge="1" parent="1" source="nErrp" target="nOrch">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="890" y="505" />
+              <mxPoint x="676" y="505" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

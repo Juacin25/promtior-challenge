@@ -71,7 +71,8 @@ SQLite, OpenAI, LangChain or Streamlit.
 app/
 ├── domain/            # Pure business core, no external deps
 │   ├── models.py      # Room, Booking, User (dataclasses) — grouped by high cohesion
-│   └── rules.py       # validation: 30-min slots, max 3h, no overlap, capacity
+│   ├── rules.py       # validation: 30-min slots, max 3h, no overlap, capacity
+│   └── exceptions.py  # Flat typed booking-rule errors
 ├── data/
 │   ├── db.py          # SQLite connection + schema
 │   └── repository.py  # save, find_by_room, find_by_user, delete
@@ -84,11 +85,14 @@ app/
 │   ├── llm.py         # ChatOpenAI config, prompt caching
 │   ├── guardrail.py   # input security-check agent
 │   ├── verifier.py    # output grounding/hallucination check agent
-│   └── orchestrator.py    # wires guardrail → booking agent → verifier
+│   ├── conversation.py # deterministic pre-validation and presentation
+│   ├── error_presentation.py # typed rule-error messages
+│   └── orchestrator.py # wires guardrail → booking agent → verifier
 ├── cache/
 │   └── semantic_cache.py  # static-data-only semantic cache
 └── ui/
-    └── streamlit_app.py   # thin: login + chat, delegates all logic; session_state memory
+    ├── session.py      # testable auth, history, turn, and logout helpers
+    └── streamlit_app.py # thin: login + chat, delegates all logic
 ```
 
 **Why these boundaries** (record any change in the README Decision Log):
@@ -123,9 +127,13 @@ at the cost of extra latency/tokens (mitigated by prompt caching):
 3. **Output verifier agent** — checks the drafted answer is grounded in tool outputs before
    it reaches the user (hallucination guard).
 
-**Date/time:** never let the LLM compute dates. Inject the real current datetime (GMT-3,
-fixed `-03:00` offset) into the system prompt; tools receive absolute ISO datetimes and
-re-validate (30-min alignment, not in the past, coherent range).
+**Date/time:** inject the real current datetime (GMT-3, fixed `-03:00` offset) into the system
+prompt rather than asking the LLM to calculate relative dates. Tools accept absolute ISO
+datetimes and reject invalid or non-GMT-3 values. For creation, the conversational layer checks
+30-minute alignment and that the end follows the start, then the domain rules enforce both again.
+`get_room_schedule` enforces 30-minute alignment but does not check range order;
+`list_available_rooms` checks neither alignment nor range order. **Known limitation:** past-date
+handling is prompt-level guidance only; no deterministic layer rejects a start in the past.
 
 **Memory:** chat history lives in `st.session_state` using LangChain message objects
 (`HumanMessage`/`AIMessage`). Bookings persist in SQLite; conversation does not.
@@ -154,13 +162,33 @@ Never cache anything that depends on current booking state — it would serve st
 
 ## Definition of Done (every task)
 
-1. Failing test written first, now passing. 2. 100% line coverage maintained.
-3. Linter clean. 4. Decision(s) recorded in README Decision Log.
+Every task is self-contained: implement, test, AND document in the same PR. Leave no
+documentation work for later. A task is done only when ALL of the following hold:
+
+1. Failing test written first, now passing (TDD).
+2. Coverage gate maintained (100% on business-meaningful modules — `domain`, `data`, `auth`,
+   `tools`, `agent`, `cache`; UI/entrypoint glue excluded via justified `# pragma: no cover`).
+3. Linter clean.
+4. **Documentation updated in the same PR (mandatory, not optional).** For every task, update
+   the README so it stays the single source of truth, covering whichever of these the task
+   touched:
+   a. **Decision Log** — one entry per decision made (chronological).
+   b. **Architecture** — any module added/changed, its responsibility, and why it lives where
+      it does (dependency direction, no business logic in the wrong layer, etc.).
+   c. **AI Workflow** — if the task touches the guardrail→booking→verifier flow, the system
+      prompt, grounding, date anchoring, caching, or memory, reflect it here.
+   d. **Environment/config** — any new env var documented in the README config section AND in
+      `.env.example` (placeholders only, never real secrets; `.env` stays gitignored).
 5. Linked GitHub Issue closed with a reference to the commit.
+
+Because documentation is part of the DoD here, task prompts may simply say
+"update docs per CLAUDE.md DoD" instead of restating the four points.
 
 ## README contract
 
 The README must always contain, and stay current with: project overview, architecture +
-justification, the AI workflow description, and a **Decision Log** (chronological, one entry
-per agreed decision). The README feeds the flow diagrams and the Jupyter documentation, so it
-must be complete and self-contained.
+justification, the AI workflow description, an environment/config section, and a **Decision
+Log** (chronological, one entry per agreed decision). It is updated in the SAME PR as the code
+it describes (see Definition of Done #4) — never deferred. The README feeds the flow diagrams
+and the Jupyter documentation (both required deliverables), so it must be complete and
+self-contained at all times, not only at the end.
